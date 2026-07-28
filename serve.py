@@ -25,7 +25,8 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), handler)
     base_url = f"http://{args.host}:{args.port}"
 
-    print(f"Customer portal:  {base_url}/customer-client.html")
+    print(f"Project home:      {base_url}/")
+    print(f"Customer portal:   {base_url}/customer-client.html")
     print(f"Service workbench: {base_url}/customer-service.html")
     print("This server only serves static files. Configure a real RuleGo backend in the pages.")
 
@@ -39,4 +40,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

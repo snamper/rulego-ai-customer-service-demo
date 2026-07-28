@@ -6,6 +6,16 @@
 
 本仓库不包含 RuleGo Server 二进制、不内置测试后端，也不会在接口失败时伪造成功结果。页面中的业务数据、回复、历史和状态都来自配置的真实 RuleGo 服务。
 
+## 在线访问
+
+本仓库通过 GitHub Pages 作为静态网站发布：
+
+- 项目导航与说明：<https://snamper.github.io/rulego-ai-customer-service-demo/>
+- 客户聊天端：<https://snamper.github.io/rulego-ai-customer-service-demo/customer-client.html>
+- 客服工作台：<https://snamper.github.io/rulego-ai-customer-service-demo/customer-service.html>
+
+GitHub Pages 只提供静态页面，不运行 RuleGo Server。在线页面必须连接支持 HTTPS、WSS 和正确 CORS 配置的真实后端；HTTPS 页面无法调用不安全的 HTTP 或 WS 接口。
+
 ## 页面截图
 
 ### 客户聊天端
@@ -39,8 +49,10 @@
 ├── rulechains/
 │   └── ai_customer_service_backend_v1.template.json
 ├── assets/
+│   ├── contact/
 │   ├── screenshots/
 │   └── architecture/
+├── index.html
 ├── serve.py
 ├── README.md
 ├── README.en.md
@@ -51,6 +63,8 @@
 - `customer-service.html`：面向客服人员和运营人员的工作台。
 - `rulechains/ai_customer_service_backend_v1.template.json`：完整规则链模板，包含 58 个节点、107 条连线和 2 个 Endpoint。
 - `serve.py`：零依赖静态文件服务，只负责打开页面，不代理或模拟后端。
+- `index.html`：GitHub Pages 项目首页，提供项目说明、页面导航、界面预览、架构图和联系方式。
+- `assets/contact/`：项目联系方式和微信群二维码。
 - `assets/screenshots/`：两个完整页面的实际运行截图。
 - `assets/architecture/`：客户侧、工作台、RuleGo 核心、服务端和编辑器的中英文结构图，以及 ImageGen 提示词。
 
@@ -129,6 +143,18 @@ python3 -m http.server 5210
 ```
 
 不要把静态页面服务误认为 RuleGo 后端。它只提供 HTML 和图片，所有 `/api/v1` 请求仍由页面中配置的 RuleGo Server 处理。
+
+### 使用 GitHub Pages
+
+GitHub Pages 配置为从 `main` 分支的仓库根目录直接发布。推送 `main` 后，Pages 会更新仓库中的静态文件，不需要额外的 Actions 工作流。根地址展示项目说明、页面导航、界面预览、架构图、启动方式和联系方式，客户聊天端与工作台使用独立路径访问。
+
+使用 GitHub Pages 时必须满足：
+
+1. RuleGo API 使用公网 HTTPS 地址。
+2. 客服业务 WebSocket 使用 WSS。
+3. 后端 CORS 明确允许 `https://snamper.github.io`。
+4. 不在页面 URL 中长期携带管理员 Token。
+5. 工作台仍由登录、网关或其他访问控制保护。
 
 ### 2. 准备 RuleGo Server
 
@@ -298,7 +324,17 @@ English:
 
 生成提示词保存在 [中文提示词](assets/architecture/IMAGEGEN_PROMPTS.md) 和 [English prompts](assets/architecture/IMAGEGEN_PROMPTS.en.md)。
 
+## 联系方式
+
+- QQ：`646282808`
+- GitHub：[snamper/rulego-ai-customer-service-demo](https://github.com/snamper/rulego-ai-customer-service-demo)
+
+### 微信群
+
+![AI 使用交流群微信群二维码](assets/contact/wechat-group-qr-2026-08-04.jpg)
+
+二维码原图标注有效期至 `2026-08-04`。二维码失效后需要在仓库中替换为新的群二维码图片。
+
 ## License
 
 Apache License 2.0，见 [LICENSE](LICENSE)。
-

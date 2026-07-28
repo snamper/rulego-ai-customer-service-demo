@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="description" content="RuleGo AI 智能客服完整演示：客户聊天端、客服工作台与真实规则链。" />
+  <link rel="icon" href="data:," />
+  <title>RuleGo AI 智能客服</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      --ink: #101820;
+      --muted: #5d6a72;
+      --paper: #ffffff;
+      --soft: #f3f7f8;
+      --line: #d7e0e2;
+      --blue: #1769aa;
+      --green: #14866d;
+      --coral: #e85d4a;
+      --focus: #ffb703;
+      --max: 1180px;
+    }
+
+    html { scroll-behavior: smooth; background: var(--paper); }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.7 "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      letter-spacing: 0;
+    }
+
+    a { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+
+    .site-header {
+      position: absolute;
+      z-index: 10;
+      inset: 0 0 auto;
+      height: 66px;
+      color: #fff;
+      border-bottom: 1px solid rgba(255,255,255,.28);
+    }
+
+    .header-inner,
+    .hero-content,
+    .section-inner,
+    .contact-inner {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255,255,255,.7);
+      border-radius: 6px;
+      background: rgba(16,24,32,.34);
+      font: 700 17px Georgia, "Times New Roman", serif;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      font-size: 13px;
+    }
+
+    .nav-links a {
+      color: rgba(255,255,255,.9);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+    }
+
+    .nav-links a:hover { border-bottom-color: #fff; }
+
+    .hero {
+      position: relative;
+      height: min(720px, 78svh);
+      min-height: 520px;
+      display: grid;
+      align-items: end;
+      overflow: hidden;
+      color: #fff;
+      background: url("assets/screenshots/customer-service-workbench.png") center top / cover no-repeat;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(10,21,28,.66);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      padding: 120px 0 74px;
+    }
+
+    .eyebrow,
+    .kicker {
+      margin: 0 0 10px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: #bdeee2;
+      font-size: 13px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 28px;
+      height: 3px;
+      background: #3bc6a5;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1, h2 {
+      font-family: Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin-bottom: 16px;
+      font-size: 52px;
+      line-height: 1.14;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      margin-bottom: 30px;
+      color: rgba(255,255,255,.86);
+      font-size: 17px;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .action-link {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 9px 17px;
+      border: 1px solid rgba(255,255,255,.72);
+      border-radius: 6px;
+      color: #fff;
+      background: rgba(16,24,32,.24);
+      text-decoration: none;
+      font-weight: 700;
+      transition: transform .18s ease, background .18s ease;
+    }
+
+    .action-link.primary { border-color: #fff; color: var(--ink); background: #fff; }
+    .action-link:hover { transform: translateY(-1px); background: rgba(23,105,170,.9); }
+    .action-link.primary:hover { background: #edf7f4; }
+
+    .section { padding: 72px 0; }
+    .section.soft { background: var(--soft); }
+
+    .section-heading {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 460px);
+      align-items: end;
+      gap: 36px;
+      margin-bottom: 34px;
+    }
+
+    h2 {
+      margin-bottom: 0;
+      font-size: 34px;
+      line-height: 1.24;
+    }
+
+    .section-heading > p { margin-bottom: 2px; color: var(--muted); }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .module {
+      min-height: 236px;
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--blue);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    .module:nth-child(2) { border-top-color: var(--green); }
+    .module:nth-child(3) { border-top-color: var(--coral); }
+
+    .module-index {
+      margin-bottom: 28px;
+      color: var(--muted);
+      font: 700 13px Georgia, "Times New Roman", serif;
+    }
+
+    .module h3 { margin-bottom: 8px; font-size: 20px; line-height: 1.35; }
+    .module p { margin-bottom: 20px; color: var(--muted); font-size: 14px; }
+    .module a { margin-top: auto; color: var(--blue); font-weight: 700; text-decoration: none; }
+    .module a:hover { text-decoration: underline; }
+
+    .screenshots,
+    .quickstart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    figure {
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    figure img {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      display: block;
+      object-fit: cover;
+      object-position: top left;
+    }
+
+    figcaption {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      font-weight: 700;
+    }
+
+    figcaption a { color: var(--blue); font-size: 13px; text-decoration: none; }
+
+    .architecture {
+      width: 100%;
+      display: block;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .quick-panel {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    .quick-panel h3 { margin-bottom: 10px; }
+    .quick-panel p { color: var(--muted); }
+
+    pre {
+      margin: 18px 0 0;
+      padding: 16px;
+      overflow: auto;
+      border-radius: 4px;
+      color: #eaf7f3;
+      background: #14242a;
+      font: 13px/1.6 "SFMono-Regular", Consolas, monospace;
+    }
+
+    .contact { color: #fff; background: #102c31; }
+
+    .contact-inner {
+      padding: 58px 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(250px, 300px) 220px;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .contact h2 { margin-bottom: 10px; }
+    .contact p { margin-bottom: 0; color: rgba(255,255,255,.72); }
+
+    .contact-box {
+      padding: 17px 18px;
+      border: 1px solid rgba(255,255,255,.34);
+      border-radius: 6px;
+      background: rgba(255,255,255,.06);
+    }
+
+    .contact-label { display: block; color: #9ad9cb; font-size: 12px; font-weight: 700; }
+
+    .contact-value {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 3px;
+      font: 700 25px Georgia, "Times New Roman", serif;
+    }
+
+    .copy-button {
+      min-height: 34px;
+      padding: 6px 10px;
+      border: 1px solid rgba(255,255,255,.45);
+      border-radius: 5px;
+      color: #fff;
+      background: transparent;
+      cursor: pointer;
+      font: 12px "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .copy-button:hover { background: rgba(255,255,255,.1); }
+
+    .qr-block { margin: 0; border-color: rgba(255,255,255,.28); background: #171717; }
+    .qr-block img { width: 100%; aspect-ratio: 939 / 1455; object-fit: contain; }
+    .qr-block figcaption {
+      display: block;
+      padding: 9px 11px;
+      color: rgba(255,255,255,.76);
+      border-top-color: rgba(255,255,255,.2);
+      font-size: 11px;
+      font-weight: 500;
+      text-align: center;
+    }
+
+    footer { padding: 20px; color: #75828a; background: #0b1b1f; text-align: center; font-size: 12px; }
+
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+    [data-reveal] {
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity .5s ease, transform .5s ease;
+    }
+
+    [data-reveal].visible { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 960px) {
+      .nav-links a:not(.nav-primary) { display: none; }
+      h1 { font-size: 43px; }
+      .section-heading { grid-template-columns: 1fr; gap: 12px; }
+      .module-grid { grid-template-columns: 1fr; }
+      .module { min-height: 0; }
+      .module-index { margin-bottom: 16px; }
+      .screenshots, .quickstart-grid { grid-template-columns: 1fr; }
+      .contact-inner { grid-template-columns: 1fr 220px; }
+      .contact-intro { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 560px) {
+      .site-header { height: 58px; }
+      .header-inner, .hero-content, .section-inner, .contact-inner { width: min(100% - 28px, var(--max)); }
+      .brand-mark { width: 28px; height: 28px; }
+      .hero { min-height: 510px; background-position: 36% top; }
+      .hero-content { padding: 94px 0 48px; }
+      h1 { font-size: 34px; }
+      .hero-copy { font-size: 15px; }
+      .action-link { width: 100%; }
+      .section { padding: 52px 0; }
+      h2 { font-size: 28px; }
+      .module, .quick-panel { padding: 20px; }
+      figcaption { align-items: flex-start; flex-direction: column; }
+      .contact-inner { grid-template-columns: 1fr; }
+      .contact-intro { grid-column: auto; }
+      .contact-value { font-size: 22px; }
+      .qr-block { width: min(240px, 100%); justify-self: center; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition: none !important; }
+      [data-reveal] { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="返回项目首页">
+        <span class="brand-mark">R</span>
+        <span>RuleGo AI 客服</span>
+      </a>
+      <nav class="nav-links" aria-label="项目导航">
+        <a href="#overview">项目组成</a>
+        <a href="#preview">界面预览</a>
+        <a href="#quickstart">快速开始</a>
+        <a href="https://github.com/snamper/rulego-ai-customer-service-demo">GitHub</a>
+        <a class="nav-primary" href="#contact">联系方式</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-content">
+        <p class="eyebrow">客户入口、客服工作台与真实规则链</p>
+        <h1 id="hero-title">RuleGo AI 智能客服</h1>
+        <p class="hero-copy">一套可直接接入真实 RuleGo Server 的完整客服场景，覆盖客户身份、会话上下文、意图与 Skill、AI 自动回复、人工协作、坐席管理和实时审查。</p>
+        <div class="hero-actions">
+          <a class="action-link primary" href="customer-client.html">进入客户聊天端</a>
+          <a class="action-link" href="customer-service.html">进入客服工作台</a>
+          <a class="action-link" href="README.md">查看使用说明</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="overview" class="section">
+      <div class="section-inner">
+        <div class="section-heading" data-reveal>
+          <div><p class="kicker">Complete scenario</p><h2>三个部分，组成完整服务闭环</h2></div>
+          <p>两个页面负责真实交互，规则链负责业务执行。仓库不内置假后端，也不会把失败请求渲染成成功结果。</p>
+        </div>
+        <div class="module-grid">
+          <article class="module" data-reveal>
+            <span class="module-index">01 / CUSTOMER</span><h3>客户聊天端</h3>
+            <p>浏览器身份、独立会话、快捷咨询、发送状态、历史同步，以及 AI 和人工回复的统一展示。</p>
+            <a href="customer-client.html">打开客户聊天端</a>
+          </article>
+          <article class="module" data-reveal>
+            <span class="module-index">02 / WORKBENCH</span><h3>客服工作台</h3>
+            <p>客户队列、画像与备注、AI 自动服务、人工介入、坐席与 Skill、报表和完整交互审查。</p>
+            <a href="customer-service.html">打开客服工作台</a>
+          </article>
+          <article class="module" data-reveal>
+            <span class="module-index">03 / RULE CHAIN</span><h3>客服规则链</h3>
+            <p>58 个节点、107 条连线和 2 个 Endpoint，覆盖意图、上下文、模型调用、人工协作和运营统计。</p>
+            <a href="rulechains/ai_customer_service_backend_v1.template.json">查看规则链 JSON</a>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="preview" class="section soft">
+      <div class="section-inner">
+        <div class="section-heading" data-reveal>
+          <div><p class="kicker">Product surfaces</p><h2>一端面向客户，一端面向服务团队</h2></div>
+          <p>两个页面都可以独立部署，也可以由现有网站、管理后台或移动端 WebView 直接集成。</p>
+        </div>
+        <div class="screenshots">
+          <figure data-reveal>
+            <img src="assets/screenshots/customer-client.png" alt="AI 客服客户聊天端实际页面" />
+            <figcaption><span>客户聊天端</span><a href="customer-client.html">访问页面</a></figcaption>
+          </figure>
+          <figure data-reveal>
+            <img src="assets/screenshots/customer-service-workbench.png" alt="AI 客服工作台实际页面" />
+            <figcaption><span>客服工作台</span><a href="customer-service.html">访问页面</a></figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-inner">
+        <div class="section-heading" data-reveal>
+          <div><p class="kicker">Architecture</p><h2>从客户消息到 AI 与人工协作</h2></div>
+          <p>规则链统一处理身份隔离、上下文缓存、意图识别、业务 Skill、模型回复、人工干预和实时回写。</p>
+        </div>
+      </div>
+      <img class="architecture" src="assets/architecture/ai-customer-service-flow-architecture.png" alt="AI 客服自动排程与规则链运行全流程结构图" loading="lazy" />
+    </section>
+
+    <section id="quickstart" class="section soft">
+      <div class="section-inner">
+        <div class="section-heading" data-reveal>
+          <div><p class="kicker">Get started</p><h2>本地预览与真实后端接入</h2></div>
+          <p>静态页面可以由 GitHub Pages 或任意 Web 服务器托管；AI、历史、客户与实时状态始终来自配置的 RuleGo Server。</p>
+        </div>
+        <div class="quickstart-grid">
+          <article class="quick-panel" data-reveal>
+            <h3>启动静态页面</h3><p>使用 Python 3 标准库，不需要安装前端依赖。</p>
+            <pre><code>python3 serve.py
+
+# 自定义端口
+python3 serve.py --port 8080</code></pre>
+          </article>
+          <article class="quick-panel" data-reveal>
+            <h3>准备服务端</h3><p>导入规则链后配置 OpenAI 兼容模型、HTTPS API、WSS、CORS 和最小权限访问凭证。</p>
+            <pre><code>${global.llm_url}
+${global.llm_api_key}
+${global.llm_model}</code></pre>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="contact">
+      <div class="contact-inner">
+        <div class="contact-intro">
+          <p class="kicker">Contact</p><h2>项目交流与使用反馈</h2>
+          <p>集成、规则链配置、AI 模型接入和场景扩展问题，可通过 QQ 联系或加入微信群交流。</p>
+        </div>
+        <div class="contact-box" aria-label="QQ 联系方式">
+          <span class="contact-label">QQ</span>
+          <div class="contact-value">
+            <span>646282808</span>
+            <button id="copyQQ" class="copy-button" type="button">复制 QQ</button>
+          </div>
+        </div>
+        <figure class="qr-block">
+          <img src="assets/contact/wechat-group-qr-2026-08-04.jpg" alt="AI 使用交流群微信群二维码" loading="lazy" />
+          <figcaption>微信群二维码，图片标注有效期至 2026-08-04</figcaption>
+        </figure>
+      </div>
+    </section>
+  </main>
+
+  <footer>RuleGo AI Customer Service Demo · Apache-2.0</footer>
+
+  <script>
+    const revealItems = document.querySelectorAll('[data-reveal]')
+    if ('IntersectionObserver' in window) {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return
+          entry.target.classList.add('visible')
+          observer.unobserve(entry.target)
+        })
+      }, { threshold: 0.12 })
+      revealItems.forEach((item) => observer.observe(item))
+    } else {
+      revealItems.forEach((item) => item.classList.add('visible'))
+    }
+
+    const copyButton = document.getElementById('copyQQ')
+    copyButton.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText('646282808')
+        copyButton.textContent = '已复制'
+      } catch {
+        copyButton.textContent = 'QQ 646282808'
+      }
+      window.setTimeout(() => { copyButton.textContent = '复制 QQ' }, 1600)
+    })
+  </script>
+</body>
+</html>

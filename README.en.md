@@ -6,6 +6,16 @@ This repository is a complete AI customer-service scenario that runs as standalo
 
 The repository does not include a RuleGo Server binary, embed a test backend, or turn failed requests into fake success responses. Business data, replies, history, and processing states shown by the pages come from the configured RuleGo service.
 
+## Live Website
+
+This repository is published as a static website through GitHub Pages:
+
+- Project home and navigation: <https://snamper.github.io/rulego-ai-customer-service-demo/>
+- Customer portal: <https://snamper.github.io/rulego-ai-customer-service-demo/customer-client.html>
+- Service workbench: <https://snamper.github.io/rulego-ai-customer-service-demo/customer-service.html>
+
+GitHub Pages only hosts static files; it does not run RuleGo Server. The hosted pages must connect to a real backend with HTTPS, WSS, and a correct CORS policy. An HTTPS page cannot call insecure HTTP or WS endpoints.
+
 ## Screenshots
 
 ### Customer portal
@@ -39,8 +49,10 @@ The repository does not include a RuleGo Server binary, embed a test backend, or
 ├── rulechains/
 │   └── ai_customer_service_backend_v1.template.json
 ├── assets/
+│   ├── contact/
 │   ├── screenshots/
 │   └── architecture/
+├── index.html
 ├── serve.py
 ├── README.md
 ├── README.en.md
@@ -51,6 +63,8 @@ The repository does not include a RuleGo Server binary, embed a test backend, or
 - `customer-service.html`: service-agent and operations workbench.
 - `rulechains/ai_customer_service_backend_v1.template.json`: complete rule-chain template with 58 nodes, 107 connections, and two Endpoints.
 - `serve.py`: dependency-free static server; it never proxies or simulates backend APIs.
+- `index.html`: GitHub Pages project home with an overview, page navigation, interface previews, architecture, and contact information.
+- `assets/contact/`: project contact information and the WeChat group QR code.
 - `assets/screenshots/`: actual running screenshots of both full pages.
 - `assets/architecture/`: Chinese and English architecture diagrams for the portal, workbench, RuleGo core, server, and editor, plus the ImageGen prompts.
 
@@ -129,6 +143,18 @@ python3 -m http.server 5210
 ```
 
 The static server is not a RuleGo backend. It only serves HTML and images. Every `/api/v1` business request is still handled by the RuleGo Server configured in the pages.
+
+### Use GitHub Pages
+
+GitHub Pages is configured to publish directly from the repository root on the `main` branch. After a push to `main`, Pages updates the static files without a separate Actions workflow. The root page provides the overview, page navigation, interface previews, architecture, startup instructions, and contact information. The customer portal and workbench remain available at dedicated paths.
+
+GitHub Pages deployment requires:
+
+1. A publicly reachable RuleGo API over HTTPS.
+2. The customer-service business WebSocket over WSS.
+3. A backend CORS policy that explicitly allows `https://snamper.github.io`.
+4. No long-lived administrator Token in page URLs.
+5. Login, gateway, or equivalent access control around the workbench.
 
 ### 2. Prepare RuleGo Server
 
@@ -298,7 +324,17 @@ English editions:
 
 The source prompts are preserved in [Chinese prompts](assets/architecture/IMAGEGEN_PROMPTS.md) and [English prompts](assets/architecture/IMAGEGEN_PROMPTS.en.md).
 
+## Contact
+
+- QQ: `646282808`
+- GitHub: [snamper/rulego-ai-customer-service-demo](https://github.com/snamper/rulego-ai-customer-service-demo)
+
+### WeChat group
+
+![WeChat group QR code for the AI user community](assets/contact/wechat-group-qr-2026-08-04.jpg)
+
+The source image states that this QR code is valid until `2026-08-04`. Replace it in the repository after it expires.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
-
