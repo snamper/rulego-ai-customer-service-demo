@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>AI 客服客户 UI</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --soft: #f8fafc;
+      --line: #d8e0ec;
+      --text: #142033;
+      --muted: #66758a;
+      --primary: #2364d2;
+      --primary-soft: #eaf1ff;
+      --success: #0f8a5f;
+      --warning: #b7791f;
+      --danger: #c2413c;
+      --shadow: 0 10px 26px rgba(20, 32, 51, .10);
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.78), rgba(245,247,251,.94)),
+        radial-gradient(circle at 16% 0%, rgba(35,100,210,.13), transparent 28%),
+        radial-gradient(circle at 92% 8%, rgba(15,138,95,.11), transparent 30%),
+        var(--bg);
+    }
+    button, input, textarea { font: inherit; }
+    .page {
+      width: min(1180px, calc(100vw - 20px));
+      height: calc(100vh - 20px);
+      margin: 10px auto;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255,255,255,.92);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 46px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.9);
+      backdrop-filter: blur(14px);
+    }
+    .logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 800;
+      background: linear-gradient(135deg, #2364d2, #0f8a5f);
+      flex: 0 0 auto;
+    }
+    .title { min-width: 0; flex: 1 1 auto; }
+    .title strong {
+      display: block;
+      font-size: 14px;
+      line-height: 1.18;
+    }
+    .title span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .status {
+      min-width: 120px;
+      text-align: right;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .status.ok { color: var(--success); }
+    .status.warning { color: var(--warning); }
+    .status.error { color: var(--danger); }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      min-height: 27px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      background: #fff;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn:hover { background: #f8fafc; border-color: #b9c5d6; }
+    .btn.primary {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+    .btn.danger {
+      color: var(--danger);
+      border-color: rgba(194,65,60,.34);
+      background: #fffafa;
+    }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .config {
+      display: grid;
+      gap: 6px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    .config[hidden] { display: none; }
+    .config.collapsed { display: none; }
+    .access-row {
+      display: grid;
+      grid-template-columns: minmax(260px, 2fr) minmax(220px, 1fr);
+      gap: 8px;
+      align-items: end;
+    }
+    .access-note {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    label {
+      display: grid;
+      gap: 4px;
+      color: #304157;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    input, textarea {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      padding: 6px 8px;
+      outline: none;
+    }
+    input:focus, textarea:focus {
+      border-color: rgba(35,100,210,.55);
+      box-shadow: 0 0 0 3px rgba(35,100,210,.10);
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--line);
+      background: var(--soft);
+    }
+    .strip .hint {
+      max-width: 520px;
+      text-align: right;
+    }
+    .pill-list {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: #224064;
+      background: #edf3ff;
+      border: 1px solid #d5e3ff;
+      font-size: 11px;
+    }
+    .pill.ok { color: var(--success); background: #eaf8f1; border-color: #bee7d4; }
+    .pill.warning { color: var(--warning); background: #fff7e6; border-color: #f5d798; }
+    .pill.error { color: var(--danger); background: #fff5f5; border-color: #f1c1be; }
+    .messages {
+      min-height: 0;
+      padding: 10px;
+      overflow: auto;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      background:
+        linear-gradient(180deg, rgba(248,250,252,.76), rgba(255,255,255,.88)),
+        var(--panel);
+    }
+    .notice {
+      border: 1px solid #f5d798;
+      border-radius: 8px;
+      background: #fffaf0;
+      color: #8a5a12;
+      padding: 8px 10px;
+      line-height: 1.55;
+      justify-self: center;
+      max-width: 620px;
+    }
+    .empty {
+      align-self: start;
+      justify-self: center;
+      max-width: 520px;
+      margin-top: 18px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.6;
+    }
+    .msg {
+      max-width: min(720px, 86%);
+      display: grid;
+      gap: 3px;
+    }
+    .msg.user { justify-self: end; }
+    .msg.assistant, .msg.system { justify-self: start; }
+    .bubble {
+      padding: 8px 10px;
+      border-radius: 9px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      box-shadow: 0 6px 18px rgba(20,32,51,.08);
+    }
+    .user .bubble {
+      color: #fff;
+      background: var(--primary);
+      border-bottom-right-radius: 4px;
+    }
+    .assistant .bubble {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 4px;
+    }
+    .system .bubble {
+      color: #49566b;
+      background: #f8fafc;
+      border: 1px dashed #cbd7e8;
+      box-shadow: none;
+    }
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      padding: 0 2px;
+    }
+    .user .meta { justify-content: flex-end; }
+    .composer {
+      display: grid;
+      gap: 7px;
+      padding: 8px 10px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .delivery-state {
+      min-height: 34px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border: 1px solid #dbe4ef;
+      border-radius: 7px;
+      background: #f8fafc;
+      color: #34445b;
+    }
+    .delivery-indicator {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #9aa8bb;
+      box-shadow: 0 0 0 4px rgba(154,168,187,.12);
+    }
+    .delivery-copy {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+    .delivery-copy strong { font-size: 11px; color: var(--text); }
+    .delivery-copy span,
+    .delivery-time { color: var(--muted); font-size: 11px; }
+    .delivery-state.sending,
+    .delivery-state.processing { border-color: #c9dcff; background: #f3f7ff; }
+    .delivery-state.sending .delivery-indicator,
+    .delivery-state.processing .delivery-indicator {
+      background: var(--primary);
+      box-shadow: 0 0 0 4px rgba(35,100,210,.13);
+      animation: delivery-pulse 1.15s ease-in-out infinite;
+    }
+    .delivery-state.complete { border-color: #bee7d4; background: #f1fbf6; }
+    .delivery-state.complete .delivery-indicator { background: var(--success); box-shadow: 0 0 0 4px rgba(15,138,95,.12); }
+    .delivery-state.waiting { border-color: #f5d798; background: #fffaf0; }
+    .delivery-state.waiting .delivery-indicator {
+      background: var(--warning);
+      box-shadow: 0 0 0 4px rgba(183,121,31,.12);
+      animation: delivery-pulse 1.35s ease-in-out infinite;
+    }
+    .delivery-state.error { border-color: #f1c1be; background: #fff5f5; }
+    .delivery-state.error .delivery-indicator { background: var(--danger); box-shadow: 0 0 0 4px rgba(194,65,60,.12); }
+    @keyframes delivery-pulse {
+      0%, 100% { transform: scale(.82); opacity: .72; }
+      50% { transform: scale(1.18); opacity: 1; }
+    }
+    .composer textarea {
+      min-height: 66px;
+      max-height: 180px;
+      resize: vertical;
+    }
+    .quick {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .quick-label {
+      color: var(--muted);
+      font-size: 11px;
+      align-self: center;
+    }
+    .quick button {
+      border-radius: 999px;
+      min-height: 24px;
+      font-size: 11px;
+    }
+    .footnote {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .composer-actions {
+      justify-content: space-between;
+      flex-wrap: nowrap;
+    }
+    .composer-actions .footnote {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .composer-actions .btn {
+      min-width: 92px;
+      flex: 0 0 auto;
+    }
+    @media (max-width: 760px) {
+      .page {
+        width: 100vw;
+        height: 100vh;
+        margin: 0;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+      }
+      .access-row { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; }
+      .status { min-width: auto; text-align: left; }
+      .title span { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="logo">C</div>
+      <div class="title">
+        <strong>AI 客服客户 UI</strong>
+        <span>客户侧公开入口；浏览器自动生成客户身份，业务结果只来自真实规则链</span>
+      </div>
+      <div id="status" class="status">公开客服入口</div>
+      <div class="actions">
+        <button id="resetIdentityBtn" class="btn" type="button">重置身份</button>
+        <button id="newSessionBtn" class="btn" type="button">新会话</button>
+        <button id="configToggleBtn" class="btn" type="button" aria-expanded="false" title="切换服务端地址和规则链">服务</button>
+        <button id="syncHistoryBtn" class="btn" type="button">同步历史</button>
+        <button id="wsToggleBtn" class="btn" type="button">实时</button>
+      </div>
+    </header>
+
+    <section id="configPanel" class="config collapsed">
+      <div class="access-row">
+        <label>服务端 URL<input id="serverUrl" autocomplete="off" placeholder="http://localhost:19806" /></label>
+        <label>规则链 ID<input id="chainId" autocomplete="off" /></label>
+      </div>
+      <div class="access-note">仅用于切换服务端和规则链。后端 API、实时通道、租户、渠道、客户身份和访问令牌均自动派生或由宿主注入。</div>
+    </section>
+
+    <div hidden aria-hidden="true">
+      <input id="apiBase" type="hidden" />
+      <input id="tenantId" type="hidden" value="default" />
+      <input id="channel" type="hidden" value="web" />
+      <input id="userId" type="hidden" />
+      <input id="sessionId" type="hidden" />
+      <input id="businessWsUrl" type="hidden" />
+    </div>
+
+    <div class="strip">
+      <div class="pill-list">
+        <span id="chainPill" class="pill">未连接规则链</span>
+        <span id="identityPill" class="pill">未选择客户</span>
+        <span id="agentPill" class="pill">AI 自动</span>
+        <span id="wsPill" class="pill warning">实时未连接</span>
+        <span id="historyPill" class="pill">历史未同步</span>
+      </div>
+      <div class="hint">AI 回复和人工坐席回复都会写入后端 `chatLog`，本页只通过业务 WS 或历史接口展示；重复同步会自动合并。</div>
+    </div>
+
+    <main id="messages" class="messages">
+      <div class="empty">客户消息会调用当前规则链；AI 回复和人工坐席回复会通过业务 WS 或后端历史同步到这里。</div>
+    </main>
+
+    <footer class="composer">
+      <div id="deliveryState" class="delivery-state idle" role="status" aria-live="polite">
+        <span class="delivery-indicator" aria-hidden="true"></span>
+        <div class="delivery-copy">
+          <strong id="deliveryTitle">可以开始咨询</strong>
+          <span id="deliveryDetail">消息发送后会实时显示客服处理状态</span>
+        </div>
+        <time id="deliveryTime" class="delivery-time"></time>
+      </div>
+      <div class="quick">
+        <span class="quick-label">快捷填入</span>
+        <button class="btn quick-fill" type="button" data-text="你好，我想了解一下你们现在能帮我处理哪些问题？">闲聊开场</button>
+        <button class="btn quick-fill" type="button" data-text="帮我查一下订单 DEMO20260001 到哪里了，物流一直没更新。">订单物流</button>
+        <button class="btn quick-fill" type="button" data-text="我申请退款两天了还没到账，订单号 DEMO20260019，麻烦帮我确认进度。">退款售后</button>
+        <button class="btn quick-fill" type="button" data-text="我已经投诉三次了，你们一直没人处理，现在立刻给我转人工客服。">转人工</button>
+      </div>
+      <textarea id="messageInput" placeholder="输入客户消息，Enter 发送，Shift+Enter 换行"></textarea>
+      <div class="actions composer-actions">
+        <span class="footnote">发送、回复、历史和人工处理结果都来自真实规则链接口；服务端 URL 只影响接入地址。</span>
+        <button id="sendBtn" class="btn primary" type="button">发送给客服</button>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    const DEFAULT_CHAIN_ID = 'ai_customer_service_backend_v1'
+    const DEFAULT_BUSINESS_WS_PORT = '6334'
+    const DEFAULT_BUSINESS_WS_PATH = '/api/v1/customer-service/ws'
+    const TOKEN_STORAGE_KEY = 'rulego_public_demo_token'
+    const VISITOR_STORAGE_KEY = 'rulego_public_demo_browser_identity'
+    const REALTIME_SIGNAL_KEY = 'rulego_public_demo_realtime_signal_v1'
+    const REALTIME_SIGNAL_CHANNEL = 'rulego_public_demo_realtime_signal'
+    const HISTORY_INTERVAL_MS = 3500
+    const $ = id => document.getElementById(id)
+    const els = {
+      status: $('status'),
+      configPanel: $('configPanel'),
+      configToggleBtn: $('configToggleBtn'),
+      serverUrl: $('serverUrl'),
+      apiBase: $('apiBase'),
+      chainId: $('chainId'),
+      userId: $('userId'),
+      sessionId: $('sessionId'),
+      tenantId: $('tenantId'),
+      channel: $('channel'),
+      businessWsUrl: $('businessWsUrl'),
+      chainPill: $('chainPill'),
+      identityPill: $('identityPill'),
+      agentPill: $('agentPill'),
+      wsPill: $('wsPill'),
+      historyPill: $('historyPill'),
+      deliveryState: $('deliveryState'),
+      deliveryTitle: $('deliveryTitle'),
+      deliveryDetail: $('deliveryDetail'),
+      deliveryTime: $('deliveryTime'),
+      messages: $('messages'),
+      messageInput: $('messageInput'),
+      sendBtn: $('sendBtn'),
+      wsToggleBtn: $('wsToggleBtn'),
+      syncHistoryBtn: $('syncHistoryBtn'),
+      resetIdentityBtn: $('resetIdentityBtn'),
+      newSessionBtn: $('newSessionBtn'),
+    }
+    const state = {
+      token: '',
+      messages: [],
+      ws: null,
+      wsConnected: false,
+      pending: new Map(),
+      seq: 0,
+      historyTimer: 0,
+      syncingHistory: false,
+      accessBlocked: false,
+      signalChannel: null,
+      processing: {
+        active: false,
+        startedAt: 0,
+        clientMessageId: '',
+      },
+    }
+
+    try {
+      state.signalChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(REALTIME_SIGNAL_CHANNEL) : null
+    } catch {
+      state.signalChannel = null
+    }
+
+    function queryParam(name) {
+      return new URLSearchParams(window.location.search).get(name) || ''
+    }
+
+    function resolveDefaultApiBase() {
+      const origin = window.location.origin
+      if (/^https?:\/\/127\.0\.0\.1:52\d{2}$/.test(origin) || /^https?:\/\/localhost:52\d{2}$/.test(origin)) {
+        return 'http://localhost:19806/api/v1'
+      }
+      return origin.replace(/\/$/, '') + '/api/v1'
+    }
+
+    function normalizeServiceUrl(value) {
+      let text = String(value || '').trim()
+      if (!text) return ''
+      if (!/^https?:\/\//i.test(text)) text = new URL(text, window.location.origin).toString()
+      return text.replace(/\/+$/, '').replace(/\/api\/v1$/i, '')
+    }
+
+    function serviceUrlFromApiBase(value) {
+      return normalizeServiceUrl(String(value || '').replace(/\/+$/, '').replace(/\/api\/v1$/i, ''))
+    }
+
+    function apiBaseFromServiceUrl(value) {
+      const base = normalizeServiceUrl(value)
+      return base ? base + '/api/v1' : ''
+    }
+
+    function serviceUrl() {
+      return normalizeServiceUrl(els.serverUrl.value || serviceUrlFromApiBase(apiBase()))
+    }
+
+    function apiBase() {
+      return els.apiBase.value.trim().replace(/\/$/, '')
+    }
+
+    function isDefaultWsUrl(value) {
+      const text = String(value || '').trim()
+      if (!text) return true
+      try {
+        const url = new URL(text, window.location.href)
+        return url.pathname === DEFAULT_BUSINESS_WS_PATH && url.port === DEFAULT_BUSINESS_WS_PORT
+      } catch {
+        return false
+      }
+    }
+
+    function chainId() {
+      return els.chainId.value.trim() || DEFAULT_CHAIN_ID
+    }
+
+    function clean(value, fallback) {
+      const text = String(value || '').trim()
+      return text || fallback
+    }
+
+    function newIdentitySuffix() {
+      return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)
+    }
+
+    function readCookie(name) {
+      const key = encodeURIComponent(name) + '='
+      return document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(key))?.slice(key.length) || ''
+    }
+
+    function writeCookie(name, value) {
+      document.cookie = encodeURIComponent(name) + '=' + encodeURIComponent(value) + '; max-age=31536000; path=/; samesite=lax'
+    }
+
+    function readBrowserIdentity() {
+      const raw = queryParam('userId')
+        ? ''
+        : (window.localStorage.getItem(VISITOR_STORAGE_KEY) || decodeURIComponent(readCookie(VISITOR_STORAGE_KEY) || ''))
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw)
+          if (parsed && parsed.userId && parsed.sessionId) return parsed
+        } catch { /* ignore invalid persisted identity */ }
+      }
+      const suffix = newIdentitySuffix()
+      return { userId: 'customer_' + suffix, sessionId: 'web_' + suffix }
+    }
+
+    function saveBrowserIdentity(userId, sessionId) {
+      const value = JSON.stringify({ userId, sessionId })
+      window.localStorage.setItem(VISITOR_STORAGE_KEY, value)
+      writeCookie(VISITOR_STORAGE_KEY, value)
+    }
+
+    function identity() {
+      const tenantId = clean(els.tenantId.value, 'default')
+      const channel = clean(els.channel.value, 'web')
+      const userId = clean(els.userId.value, 'anonymous')
+      const sessionId = clean(els.sessionId.value, userId)
+      return {
+        tenantId,
+        channel,
+        userId,
+        sessionId,
+        isolationKey: [tenantId, channel, userId, sessionId].map(encodeURIComponent).join(':'),
+      }
+    }
+
+    function authHeaders() {
+      return state.token ? { Authorization: 'Bearer ' + state.token } : {}
+    }
+
+    function emitRealtimeSignal(operation, data) {
+      const id = identity()
+      const payload = {
+        ...(data || {}),
+        source: 'customer-client.html',
+        signalId: 'signal_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
+        operation,
+        apiBase: apiBase(),
+        chainId: chainId(),
+        ...id,
+        ts: new Date().toISOString(),
+      }
+      try { state.signalChannel?.postMessage(payload) } catch { /* ignored */ }
+      try { window.localStorage.setItem(REALTIME_SIGNAL_KEY, JSON.stringify(payload)) } catch { /* ignored */ }
+    }
+
+    function parseJson(text) {
+      try { return JSON.parse(text) } catch { return text }
+    }
+
+    function normalizeResult(data) {
+      if (typeof data === 'string') return parseJson(data)
+      if (data && typeof data === 'object' && data.msg && typeof data.msg === 'object') return data.msg
+      if (data && typeof data === 'object' && data.data && typeof data.data === 'object') return data.data
+      return data
+    }
+
+    function displayError(error) {
+      return error?.message || String(error || '未知错误')
+    }
+
+    function isAuthFailure(error) {
+      const text = displayError(error).toLowerCase()
+      return error?.status === 401 ||
+        error?.status === 403 ||
+        text.includes('unauthorized') ||
+        text.includes('forbidden') ||
+        text.includes('invalid token') ||
+        text.includes('expired token') ||
+        text.includes('token expired') ||
+        text.includes('missing token') ||
+        text.includes('token is required') ||
+        text.includes('登录态失效') ||
+        text.includes('请先登录') ||
+        text.includes('未登录') ||
+        text.includes('鉴权失败') ||
+        text.includes('认证失败') ||
+        text.includes('未经授权') ||
+        text.includes('无权访问')
+    }
+
+    function blockPublicAccess(reason) {
+      state.token = ''
+      state.accessBlocked = true
+      closeWs('auth expired')
+      state.processing.active = false
+      state.processing.clientMessageId = ''
+      els.sendBtn.disabled = false
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+      stopHistoryTimer()
+      setStatus(reason || '公开接入被拒绝，请由宿主提供客户访问 Token', 'error')
+      setWsPill('实时需令牌', 'warning')
+      setHistoryPill('历史需令牌', 'warning')
+      setAgentPill('待接入', 'warning')
+      setDeliveryState('error', '消息未发送', '客服入口需要由宿主提供访问令牌', new Date())
+      renderMessages()
+    }
+
+    function setStatus(text, mode) {
+      els.status.textContent = text
+      els.status.className = 'status ' + (mode || '')
+    }
+
+    function setDeliveryState(mode, title, detail, value) {
+      const stateMode = mode || 'idle'
+      els.deliveryState.className = 'delivery-state ' + stateMode
+      els.deliveryTitle.textContent = title || '可以开始咨询'
+      els.deliveryDetail.textContent = detail || ''
+      els.deliveryTime.textContent = value ? formatTime(value) : ''
+      els.sendBtn.textContent = stateMode === 'sending'
+        ? '发送中...'
+        : (stateMode === 'processing' ? '处理中...' : '发送给客服')
+    }
+
+    function setWsPill(text, mode) {
+      els.wsPill.textContent = text || '实时未连接'
+      els.wsPill.className = 'pill ' + (mode || '')
+      els.wsToggleBtn.textContent = state.ws ? '断开实时' : '实时'
+    }
+
+    function setAgentPill(text, mode) {
+      els.agentPill.textContent = text || 'AI 自动'
+      els.agentPill.className = 'pill ' + (mode || '')
+    }
+
+    function setHistoryPill(text, mode) {
+      els.historyPill.textContent = text || '历史未同步'
+      els.historyPill.className = 'pill ' + (mode || '')
+    }
+
+    function updatePills() {
+      const id = identity()
+      els.chainPill.textContent = chainId()
+      els.identityPill.textContent = id.tenantId + ' / ' + id.channel + ' / ' + id.userId + ' / ' + id.sessionId
+    }
+
+    function updateApiFromServiceUrl(options) {
+      const base = serviceUrl()
+      if (!base) return
+      const shouldRefreshWs = options?.forceWs || isDefaultWsUrl(els.businessWsUrl.value)
+      els.serverUrl.value = base
+      els.apiBase.value = apiBaseFromServiceUrl(base)
+      if (shouldRefreshWs) els.businessWsUrl.value = defaultWsUrl()
+      persistConfig()
+    }
+
+    function formatTime(value) {
+      const date = value ? new Date(value) : new Date()
+      if (Number.isNaN(date.getTime())) return ''
+      return date.toLocaleTimeString('zh-CN', { hour12: false })
+    }
+
+    function normalizeMessageContent(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim()
+    }
+
+    function messageTimeMs(item) {
+      const value = item?.ts || item?.time || item?.createdAt || item?.updatedAt
+      const time = value ? new Date(value).getTime() : 0
+      return Number.isFinite(time) ? time : 0
+    }
+
+    function isFallbackReply(item) {
+      const source = String(item?.source || '').toLowerCase()
+      return source.includes('fallback') || Boolean(item?.aiError || item?.llmError)
+    }
+
+    function sameMessageCandidate(left, right) {
+      if (!left || !right) return false
+      const leftId = left.id || left.messageId || left.clientMessageId || ''
+      const rightId = right.id || right.messageId || right.clientMessageId || ''
+      if (leftId && rightId && leftId === rightId) return true
+      const leftClientId = left.clientMessageId || ''
+      const rightClientId = right.clientMessageId || ''
+      if (leftClientId && rightClientId && leftClientId === rightClientId) return true
+      if (left.role !== right.role) return false
+      if (normalizeMessageContent(left.content) !== normalizeMessageContent(right.content)) return false
+      const leftTime = messageTimeMs(left)
+      const rightTime = messageTimeMs(right)
+      if (!leftTime || !rightTime) return true
+      if (left.pendingLocal && !right.pendingLocal) return !leftTime || !rightTime || Math.abs(leftTime - rightTime) <= 180000
+      if (right.pendingLocal) return false
+      const isHumanReply = Boolean(left.author || left.operator || right.author || right.operator)
+        || String(left.source || right.source || '').includes('human_assist')
+      return Boolean(leftTime && rightTime && Math.abs(leftTime - rightTime) <= (isHumanReply ? 120000 : 20000))
+    }
+
+    function mergeMessageRecord(existing, incoming) {
+      const confirmed = incoming.pendingLocal ? existing : incoming
+      const fallback = incoming.pendingLocal ? incoming : existing
+      const merged = {
+        ...fallback,
+        ...confirmed,
+        id: confirmed.id || confirmed.messageId || fallback.id || fallback.messageId || '',
+        clientMessageId: confirmed.clientMessageId || fallback.clientMessageId || '',
+        ts: confirmed.ts || fallback.ts || new Date().toISOString(),
+        meta: incoming.pendingLocal ? (incoming.meta || existing.meta || '') : (incoming.meta || ''),
+        pendingLocal: Boolean(existing.pendingLocal && incoming.pendingLocal),
+      }
+      if (!merged.meta && existing.pendingLocal && !incoming.pendingLocal) delete merged.meta
+      return merged
+    }
+
+    function mergeMessages(next, options) {
+      const beforeFingerprint = state.messages.map(item => [item.id || item.clientMessageId || '', item.role, item.content, item.ts || '', item.source || '', item.author || item.operator || ''].join('|')).join('\n')
+      const merged = []
+      ;[...state.messages, ...(Array.isArray(next) ? next : [])].forEach(item => {
+        const content = String(item?.content || '').trim()
+        if (!content) return
+        const normalized = { ...item, content }
+        const index = merged.findIndex(existing => sameMessageCandidate(existing, normalized))
+        if (index >= 0) {
+          merged[index] = mergeMessageRecord(merged[index], normalized)
+        } else {
+          merged.push(normalized)
+        }
+      })
+      state.messages = merged.sort((a, b) => {
+        const left = messageTimeMs(a)
+        const right = messageTimeMs(b)
+        return (left || 0) - (right || 0)
+      })
+      const afterFingerprint = state.messages.map(item => [item.id || item.clientMessageId || '', item.role, item.content, item.ts || '', item.source || '', item.author || item.operator || ''].join('|')).join('\n')
+      if (beforeFingerprint !== afterFingerprint || options?.forceRender) renderMessages()
+    }
+
+    function appendLocalMessage(role, content, meta, extra) {
+      const text = String(content || '').trim()
+      if (!text) return
+      mergeMessages([{ role, content: text, ts: new Date().toISOString(), meta: meta || '', pendingLocal: true, ...(extra || {}) }])
+      renderMessages(true)
+    }
+
+    function renderMessages(scroll) {
+      els.messages.innerHTML = ''
+      if (!state.messages.length) {
+        const empty = document.createElement('div')
+        empty.className = 'empty'
+        empty.textContent = state.accessBlocked
+          ? '公开客服接入被服务端拒绝，请由宿主页或公开网关注入客户访问 Token。'
+          : '暂无会话消息。客户消息发送后会调用 CUSTOMER_MESSAGE；AI 回复和人工坐席回复都会通过真实历史或 WS 同步显示。'
+        els.messages.appendChild(empty)
+        return
+      }
+      state.messages.forEach(item => {
+        const row = document.createElement('div')
+        row.className = 'msg ' + (item.role === 'user' ? 'user' : (item.role === 'system' ? 'system' : 'assistant'))
+        const bubble = document.createElement('div')
+        bubble.className = 'bubble'
+        bubble.textContent = item.content
+        const meta = document.createElement('div')
+        meta.className = 'meta'
+        const source = String(item.source || '').toLowerCase()
+        const isHumanReply = Boolean(item.author || item.operator) || source.includes('human_assist') || source.includes('human-reply')
+        const label = item.role === 'user'
+          ? '客户'
+          : (item.role === 'system'
+              ? '系统'
+              : (source.includes('human-wait')
+                  ? '服务状态'
+                  : (isHumanReply
+                      ? (item.author || item.operator || '人工客服')
+                      : (isFallbackReply(item) ? '规则链兜底' : 'AI 客服'))))
+        meta.textContent = [label, formatTime(item.ts), item.intent || item.meta || ''].filter(Boolean).join(' · ')
+        row.append(bubble, meta)
+        els.messages.appendChild(row)
+      })
+      if (scroll) els.messages.scrollTop = els.messages.scrollHeight
+    }
+
+    function normalizeHistoryMessages(data) {
+      const body = normalizeResult(data) || {}
+      const list = Array.isArray(body.chatLog) ? body.chatLog
+        : (Array.isArray(body.messages) ? body.messages
+          : (Array.isArray(body.history) ? body.history : []))
+      return list.map(item => ({
+        role: item.role === 'user' ? 'user' : (item.role === 'system' ? 'system' : 'assistant'),
+        content: String(item.content || item.text || item.message || item.reply || '').trim(),
+        ts: item.ts || item.time || item.createdAt || item.updatedAt || '',
+        intent: item.intent || '',
+        id: item.id || item.messageId || '',
+        clientMessageId: item.clientMessageId || '',
+        author: item.author || item.operator || '',
+        operator: item.operator || item.author || '',
+        source: item.source || '',
+        aiError: item.aiError || item.llmError || '',
+        action: item.action || item.actionType || '',
+      })).filter(item => item.content)
+    }
+
+    async function executeHttpOperation(operation, payload) {
+      const response = await fetch(apiBase() + '/rules/' + encodeURIComponent(chainId()) + '/execute/' + encodeURIComponent(operation), {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+      const raw = await response.text()
+      const data = parseJson(raw)
+      if (!response.ok) {
+        const message = typeof data === 'string' ? data : (data?.message || data?.error || ('HTTP ' + response.status))
+        const error = new Error(message)
+        error.status = response.status
+        throw error
+      }
+      return normalizeResult(data)
+    }
+
+    async function executeOperation(operation, payload, timeoutMs) {
+      if (state.wsConnected && state.ws?.readyState === WebSocket.OPEN) {
+        try {
+          return normalizeResult(await executeWsOperation(operation, payload, timeoutMs || 45000))
+        } catch (error) {
+          if (operation === 'CUSTOMER_MESSAGE') throw error
+          // Continue with HTTP. This is still a real backend call, not a local fallback.
+        }
+      }
+      return executeHttpOperation(operation, payload)
+    }
+
+    function applyHistoryServiceState(historyData, list) {
+      const body = normalizeResult(historyData) || {}
+      const session = body.sessionMemory && typeof body.sessionMemory === 'object' ? body.sessionMemory : {}
+      const assigned = session.assignedAgent || session.sessionMemory?.assignedAgent || null
+      const aiAutoContinue = session.aiAutoContinue ?? session.sessionMemory?.aiAutoContinue
+      const needHuman = session.needHuman === true || session.sessionMemory?.needHuman === true
+      const latestAssistant = [...(Array.isArray(list) ? list : [])].reverse().find(item => item.role === 'assistant')
+      const latestIsHuman = Boolean(latestAssistant?.author || latestAssistant?.operator) || String(latestAssistant?.source || '').includes('human_assist')
+      const latestIsFallback = isFallbackReply(latestAssistant)
+      if (aiAutoContinue === false) {
+        const agentName = assigned?.name || assigned?.displayName || '人工客服'
+        setAgentPill(agentName + ' 处理中', 'warning')
+        setStatus('人工客服处理中', 'warning')
+        setDeliveryState('waiting', '人工客服处理中', '当前会话已由人工坐席接管', new Date())
+      } else if (needHuman) {
+        setAgentPill('等待人工关注', 'warning')
+        setStatus('等待人工关注', 'warning')
+        setDeliveryState('waiting', '等待人工客服', 'AI 已完成初步回复并提示人工介入', new Date())
+      } else if (assigned) {
+        const agentName = assigned.name || assigned.displayName || '人工客服'
+        setAgentPill(agentName + ' 已接入 · AI 协作', 'ok')
+        setStatus(agentName + ' 已接入', 'ok')
+        setDeliveryState('complete', agentName + ' 已接入', '人工客服可直接回复，AI 自动服务继续运行', new Date())
+      } else if (latestIsHuman) {
+        setAgentPill('AI 自动', 'ok')
+        setStatus('已同步人工回复', 'ok')
+        setDeliveryState('complete', '人工客服已回复', '回复和历史记录均已同步', new Date())
+      } else if (latestIsFallback) {
+        setAgentPill('规则链兜底', 'warning')
+        setStatus('AI 暂不可用，已使用规则链兜底', 'warning')
+        setDeliveryState('complete', '已返回降级回复', '模型调用失败，当前内容由规则链兜底生成', new Date())
+      } else if (latestAssistant) {
+        setAgentPill('AI 自动', 'ok')
+        setStatus('已同步客服回复', 'ok')
+        setDeliveryState('complete', '客服已回复', '回复和历史记录均已同步', new Date())
+      }
+    }
+
+    function finishProcessingFromHistory(list, historyData) {
+      if (!state.processing.active) return false
+      const startedAt = state.processing.startedAt || Date.now()
+      const hasFreshAssistantReply = (Array.isArray(list) ? list : []).some(item => {
+        if (item.role !== 'assistant') return false
+        const time = messageTimeMs(item)
+        return !time || time >= startedAt - 5000
+      })
+      if (!hasFreshAssistantReply) return false
+      state.processing.active = false
+      state.processing.clientMessageId = ''
+      els.sendBtn.disabled = false
+      applyHistoryServiceState(historyData, list)
+      emitRealtimeSignal('CUSTOMER_MESSAGE_DONE', {
+        processing: false,
+        pending: false,
+        status: 'done',
+        label: '已通过后端历史同步到回复',
+      })
+      return true
+    }
+
+    async function syncHistory(reason) {
+      if (state.accessBlocked || state.syncingHistory) return false
+      state.syncingHistory = true
+      if (reason !== 'auto') setHistoryPill('同步中', 'warning')
+      try {
+        const id = identity()
+        const data = await executeHttpOperation('CONVERSATION_HISTORY', {
+          operation: 'CONVERSATION_HISTORY',
+          ...id,
+          limit: 100,
+        }, 30000)
+        const list = normalizeHistoryMessages(data)
+        if (list.length) {
+          mergeMessages(list)
+          const finishedProcessing = finishProcessingFromHistory(list, data)
+          if (!finishedProcessing && !state.processing.active) applyHistoryServiceState(data, list)
+          if (reason !== 'auto') setHistoryPill('历史已同步 ' + list.length, 'ok')
+        } else {
+          if (reason !== 'auto') setHistoryPill('后端暂无历史', '')
+        }
+        return true
+      } catch (error) {
+        setHistoryPill('历史同步失败', 'error')
+        if (isAuthFailure(error)) {
+          blockPublicAccess('公开历史接口被拒绝，请由宿主提供客户访问 Token')
+        } else if (reason !== 'auto') {
+          appendLocalMessage('system', '历史同步失败：' + displayError(error))
+        }
+        return false
+      } finally {
+        state.syncingHistory = false
+      }
+    }
+
+    async function sendMessage() {
+      const text = els.messageInput.value.trim()
+      if (!text) return
+      if (state.accessBlocked) {
+        appendLocalMessage('system', '公开客服接入被服务端拒绝：请由宿主页或公开网关注入客户访问 Token。')
+        setStatus('等待客户访问 Token', 'warning')
+        return
+      }
+      const id = identity()
+      const clientMessageId = 'client_msg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+      const payload = {
+        operation: 'CUSTOMER_MESSAGE',
+        ...id,
+        messageId: clientMessageId,
+        clientMessageId,
+        text,
+        history: state.messages.slice(-12).map(item => ({ role: item.role, content: item.content, ts: item.ts })),
+        customerProfile: {
+          tenantId: id.tenantId,
+          channel: id.channel,
+          userId: id.userId,
+          sessionId: id.sessionId,
+          isolationKey: id.isolationKey,
+          source: 'customer-client.html',
+        },
+      }
+      appendLocalMessage('user', text, '已提交', { id: clientMessageId, clientMessageId })
+      state.processing.active = true
+      state.processing.startedAt = Date.now()
+      state.processing.clientMessageId = clientMessageId
+      emitRealtimeSignal('CUSTOMER_MESSAGE', {
+        text,
+        messageId: clientMessageId,
+        clientMessageId,
+        pending: true,
+        status: 'processing',
+        label: '客户已发送，规则链处理中',
+      })
+      emitRealtimeSignal('AI_PROCESSING', {
+        text,
+        messageId: clientMessageId,
+        clientMessageId,
+        processing: true,
+        pending: true,
+        status: 'processing',
+        label: 'AI 客服处理中',
+      })
+      els.messageInput.value = ''
+      setStatus('规则链处理中...', 'warning')
+      setAgentPill('AI 处理中', 'warning')
+      setDeliveryState('sending', '正在发送消息', '正在提交到客服规则链', new Date())
+      els.sendBtn.disabled = true
+      try {
+        const request = executeOperation('CUSTOMER_MESSAGE', payload, 90000)
+        setDeliveryState('processing', '消息已发送，客服处理中', 'AI 客服正在分析并生成回复', new Date())
+        const data = await request
+        const reply = typeof data === 'string' ? data : String(data?.reply || data?.message || data?.content || '').trim()
+        const fallbackReply = isFallbackReply(data)
+        if (reply) {
+          mergeMessages([{
+            role: 'assistant',
+            content: reply,
+            ts: data?.updatedAt || data?.ts || new Date().toISOString(),
+            intent: data?.intent || '',
+            author: String(data?.source || '').includes('human_assist') ? (data?.operator || data?.assignedAgent?.name || '') : '',
+            source: data?.source || '',
+            aiError: data?.aiError || data?.llmError || '',
+            action: data?.action || '',
+            pendingLocal: true,
+            id: data?.messageId || data?.replyId || '',
+          }])
+        }
+        if (data?.aiAutoContinue === false) {
+          const agentName = data?.assignedAgent?.name || data?.assignedAgent?.displayName || '人工客服'
+          setAgentPill(agentName + ' 处理中', 'warning')
+          setStatus('人工客服处理中', 'warning')
+          setDeliveryState('waiting', '人工客服处理中', reply || '当前会话已由人工坐席接管', data?.updatedAt || data?.ts || new Date())
+        } else if (data?.needHuman === true) {
+          setAgentPill('等待人工关注', 'warning')
+          setStatus('已进入人工关注状态', 'warning')
+          setDeliveryState('waiting', '消息已收到，等待人工客服', 'AI 已识别为需要人工关注', data?.updatedAt || data?.ts || new Date())
+        } else if (reply && fallbackReply) {
+          setAgentPill('规则链兜底', 'warning')
+          setStatus('AI 暂不可用，已使用规则链兜底', 'warning')
+          setDeliveryState('complete', '已返回降级回复', '模型调用失败，当前内容由规则链兜底生成', data?.updatedAt || data?.ts || new Date())
+        } else if (reply) {
+          setAgentPill('AI 自动', 'ok')
+          setStatus('回复完成', 'ok')
+          setDeliveryState('complete', '客服已回复', '消息发送和处理均已完成', data?.updatedAt || data?.ts || new Date())
+        } else {
+          setAgentPill('AI 处理中', 'warning')
+          setStatus('消息已发送，等待客服回复', 'warning')
+          setDeliveryState('processing', '消息已发送，等待客服回复', '规则链已接收，正在等待后续回复', data?.updatedAt || data?.ts || new Date())
+        }
+        emitRealtimeSignal(reply || data?.needHuman === true ? 'CUSTOMER_MESSAGE_DONE' : 'AI_PROCESSING', {
+          reply,
+          intent: data?.intent || '',
+          needHuman: data?.needHuman === true,
+          processing: !reply && data?.needHuman !== true,
+          pending: !reply && data?.needHuman !== true,
+          status: data?.needHuman === true ? 'human_attention' : (reply ? 'done' : 'processing'),
+          messageId: data?.messageId || data?.replyId || '',
+          clientMessageId,
+          source: data?.source || '',
+          operator: data?.operator || '',
+          assignedAgent: data?.assignedAgent || null,
+          agentStatus: data?.agentStatus || '',
+          aiAutoContinue: data?.aiAutoContinue,
+        })
+        await syncHistory('after-send')
+      } catch (error) {
+        if (state.processing.active && state.processing.clientMessageId === clientMessageId) {
+          if (isAuthFailure(error)) {
+            appendLocalMessage('system', '公开发送被服务端拒绝：需要客户访问 Token。')
+            blockPublicAccess('公开发送被拒绝，请由宿主提供客户访问 Token')
+          } else {
+            appendLocalMessage('system', '请求失败：' + displayError(error))
+            setStatus('请求失败', 'error')
+            setAgentPill('处理异常', 'error')
+            setDeliveryState('error', '消息发送或处理失败', displayError(error), new Date())
+          }
+          emitRealtimeSignal('CUSTOMER_MESSAGE_ERROR', {
+            error: displayError(error),
+            processing: false,
+            pending: false,
+            status: 'error',
+            clientMessageId,
+          })
+        }
+      } finally {
+        if (state.processing.clientMessageId === clientMessageId) {
+          state.processing.active = false
+          state.processing.clientMessageId = ''
+        }
+        els.sendBtn.disabled = false
+        els.sendBtn.textContent = '发送给客服'
+      }
+    }
+
+    function wsUrl() {
+      const raw = els.businessWsUrl.value.trim()
+      if (!raw) return ''
+      let url
+      if (/^wss?:\/\//i.test(raw) || /^https?:\/\//i.test(raw)) {
+        url = new URL(raw)
+      } else if (raw.startsWith('/')) {
+        url = new URL(raw, new URL(apiBase()).origin)
+      } else {
+        url = new URL(raw, apiBase().replace(/\/$/, '') + '/')
+      }
+      if (url.protocol === 'http:') url.protocol = 'ws:'
+      if (url.protocol === 'https:') url.protocol = 'wss:'
+      if (state.token && !url.searchParams.has('token')) url.searchParams.set('token', state.token)
+      return url.toString()
+    }
+
+    function defaultWsUrl() {
+      const base = new URL(apiBase() || resolveDefaultApiBase(), window.location.href)
+      base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
+      base.port = DEFAULT_BUSINESS_WS_PORT
+      base.pathname = DEFAULT_BUSINESS_WS_PATH
+      base.search = ''
+      return base.toString()
+    }
+
+    function closeWs(reason) {
+      const ws = state.ws
+      state.ws = null
+      state.wsConnected = false
+      state.pending.forEach(entry => {
+        window.clearTimeout(entry.timer)
+        entry.reject(new Error(reason || '业务 WS 已断开'))
+      })
+      state.pending.clear()
+      if (ws) {
+        try { ws.close(1000, reason || 'manual') } catch { /* ignored */ }
+      }
+      setWsPill(state.accessBlocked ? '实时需令牌' : '实时未连接', state.accessBlocked ? 'warning' : '')
+    }
+
+    function normalizeWsPayload(payload) {
+      if (!payload || typeof payload !== 'object') return null
+      if (payload.msg && typeof payload.msg === 'object') return payload.msg
+      if (payload.data && typeof payload.data === 'object') return payload.data
+      if (payload.payload && typeof payload.payload === 'object') return payload.payload
+      return payload
+    }
+
+    function operationOf(payload) {
+      const data = normalizeWsPayload(payload)
+      return String(data?.event || data?.type || data?.operation || data?.action || payload?.event || payload?.type || '').trim().toUpperCase()
+    }
+
+    function sameIdentity(data) {
+      const id = identity()
+      return clean(data?.tenantId, id.tenantId) === id.tenantId &&
+        clean(data?.channel, id.channel) === id.channel &&
+        clean(data?.userId || data?.customerId, id.userId) === id.userId &&
+        clean(data?.sessionId || data?.conversationId, id.sessionId) === id.sessionId
+    }
+
+    function handleWsEvent(payload) {
+      const data = normalizeWsPayload(payload)
+      const operation = operationOf(payload)
+      if (!data || !operation || !sameIdentity(data)) return
+      if (operation === 'CUSTOMER_STATUS' || operation === 'AI_PROCESSING' || operation === 'PROCESSING' || operation === 'CUSTOMER_MESSAGE_STARTED') {
+        const status = String(data.status || data.state || '').toLowerCase()
+        const waitingHuman = data.needHuman === true || status.includes('human') || status.includes('handoff')
+        const processing = data.processing === true || data.pending === true || ['processing', 'running', 'started', 'pending'].includes(status)
+        if (waitingHuman) {
+          setAgentPill('等待人工关注', 'warning')
+          setStatus('等待人工关注', 'warning')
+          setDeliveryState('waiting', '客服已收到，等待人工处理', data.label || data.step || '当前咨询需要人工关注', data.ts || data.updatedAt || new Date())
+        } else if (processing) {
+          setAgentPill('AI 处理中', 'warning')
+          setStatus('AI 客服处理中...', 'warning')
+          setDeliveryState('processing', '消息已发送，客服处理中', data.label || data.step || 'AI 客服正在处理', data.ts || data.updatedAt || new Date())
+        } else {
+          setAgentPill('AI 自动', 'ok')
+          setStatus('处理状态已更新', 'ok')
+        }
+      } else if (operation === 'CUSTOMER_MESSAGE' || operation === 'USER_MESSAGE') {
+        const text = data.text || data.content || data.message
+        if (text) mergeMessages([{
+          role: 'user',
+          content: text,
+          ts: data.ts || data.updatedAt || new Date().toISOString(),
+          id: data.id || data.messageId || '',
+          clientMessageId: data.clientMessageId || '',
+        }])
+      } else if (['ASSISTANT_REPLY', 'AI_REPLY', 'CUSTOMER_REPLY', 'CUSTOMER_MESSAGE_DONE', 'HUMAN_INTERVENTION', 'HUMAN_INTERVENTION_DONE', 'HUMAN_REPLY'].includes(operation)) {
+        const reply = data.reply || data.content || data.text || data.message
+        if (!reply && operation.includes('HUMAN')) {
+          const action = String(data.action || '').toLowerCase()
+          const agentName = data.assignedAgent?.name || data.assignedAgent?.displayName || data.operator || '人工客服'
+          if (action === 'return_ai' || data.agentStatus === 'ai_auto') {
+            setAgentPill('AI 自动', 'ok')
+            setStatus('已恢复 AI 自动服务', 'ok')
+            setDeliveryState('complete', 'AI 自动服务中', '人工坐席已结束接入', data.ts || data.updatedAt || data.createdAt || new Date())
+          } else if (data.assignedAgent || data.agentStatus === 'human_active') {
+            setAgentPill(agentName + ' 已接入', data.aiAutoContinue === false ? 'warning' : 'ok')
+            setStatus(agentName + ' 已接入', data.aiAutoContinue === false ? 'warning' : 'ok')
+            setDeliveryState(data.aiAutoContinue === false ? 'waiting' : 'complete', agentName + ' 已接入', data.aiAutoContinue === false ? '当前由人工客服处理' : '人工客服可直接回复，AI 服务继续运行', data.ts || data.updatedAt || data.createdAt || new Date())
+          }
+          syncHistory('human-state')
+        }
+        if (reply) {
+          mergeMessages([{
+            role: 'assistant',
+            content: reply,
+            ts: data.ts || data.updatedAt || data.createdAt || new Date().toISOString(),
+            intent: data.intent || (operation.includes('HUMAN') ? 'human_handoff' : ''),
+            author: data.operator || '',
+            operator: data.operator || '',
+            source: data.source || (operation.includes('HUMAN') ? 'human_assist' : ''),
+            aiError: data.aiError || data.llmError || '',
+            action: data.action || '',
+            id: data.id || data.messageId || data.replyId || '',
+            clientMessageId: data.clientMessageId || '',
+          }])
+          if (data.aiAutoContinue === false) {
+            const agentName = data.assignedAgent?.name || data.assignedAgent?.displayName || '人工客服'
+            setAgentPill(agentName + ' 处理中', 'warning')
+            setStatus('人工客服处理中', 'warning')
+            setDeliveryState('waiting', '人工客服处理中', reply || '当前会话已由人工坐席接管', data.ts || data.updatedAt || data.createdAt || new Date())
+          } else if (operation.includes('HUMAN')) {
+            setAgentPill('人工已回复 · AI 自动', 'ok')
+            setStatus('收到人工回复', 'ok')
+            setDeliveryState('complete', '人工客服已回复', '回复已实时同步', data.ts || data.updatedAt || data.createdAt || new Date())
+          } else if (isFallbackReply(data)) {
+            setAgentPill('规则链兜底', 'warning')
+            setStatus('AI 暂不可用，已使用规则链兜底', 'warning')
+            setDeliveryState('complete', '已返回降级回复', '模型调用失败，当前内容由规则链兜底生成', data.ts || data.updatedAt || new Date())
+          } else if (data.needHuman === true) {
+            setAgentPill('等待人工关注', 'warning')
+            setStatus('已提示人工关注', 'warning')
+            setDeliveryState('waiting', '等待人工客服', 'AI 已完成初步处理并通知人工', data.ts || data.updatedAt || new Date())
+          } else {
+            setAgentPill('AI 自动', 'ok')
+            setStatus('收到客服回复', 'ok')
+            setDeliveryState('complete', '客服已回复', '回复已实时同步', data.ts || data.updatedAt || data.createdAt || new Date())
+          }
+          syncHistory('ws')
+        }
+      } else if (operation.includes('ERROR')) {
+        appendLocalMessage('system', data.error || data.message || '客服处理失败')
+        setAgentPill('处理异常', 'error')
+        setDeliveryState('error', '客服处理失败', data.error || data.message || '请稍后重试', data.ts || new Date())
+      }
+    }
+
+    function resolveWsResponse(payload) {
+      if (!state.pending.size) return
+      const data = normalizeWsPayload(payload)
+      const requestId = data?.requestId || payload?.requestId || payload?.id
+      if (requestId && state.pending.has(requestId)) {
+        const entry = state.pending.get(requestId)
+        window.clearTimeout(entry.timer)
+        state.pending.delete(requestId)
+        entry.resolve(payload)
+      }
+    }
+
+    function connectWs() {
+      if (state.accessBlocked) {
+        setStatus('等待客户访问 Token', 'warning')
+        return Promise.resolve(false)
+      }
+      const url = wsUrl()
+      if (!url) {
+        setWsPill('实时未配置', 'warning')
+        return Promise.resolve(false)
+      }
+      closeWs('reconnect')
+      const ws = new WebSocket(url)
+      state.ws = ws
+      setWsPill('实时连接中', 'warning')
+      setAgentPill('AI 自动', '')
+      return new Promise(resolve => {
+        let settled = false
+        const settle = value => {
+          if (settled) return
+          settled = true
+          resolve(value)
+        }
+        const timer = window.setTimeout(() => {
+          if (state.ws === ws && ws.readyState !== WebSocket.OPEN) {
+            setWsPill('实时超时', 'warning')
+            settle(false)
+          }
+        }, 8000)
+        ws.onopen = () => {
+          window.clearTimeout(timer)
+          if (state.ws !== ws) {
+            settle(false)
+            return
+          }
+          state.wsConnected = true
+          setWsPill('实时已连接', 'ok')
+          settle(true)
+        }
+        ws.onmessage = event => {
+          if (state.ws !== ws) return
+          let payload = event.data
+          try { payload = JSON.parse(event.data) } catch { /* keep text */ }
+          resolveWsResponse(payload)
+          handleWsEvent(payload)
+        }
+        ws.onerror = () => {
+          window.clearTimeout(timer)
+          if (state.ws !== ws) {
+            settle(false)
+            return
+          }
+          setWsPill('实时异常', 'warning')
+          settle(false)
+        }
+        ws.onclose = event => {
+          window.clearTimeout(timer)
+          if (state.ws === ws) state.ws = null
+          state.wsConnected = false
+          setWsPill(event.code === 1000 ? '实时未连接' : ('实时断开 ' + event.code), event.code === 1000 ? '' : 'warning')
+          settle(false)
+        }
+      })
+    }
+
+    function executeWsOperation(operation, payload, timeoutMs) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('业务 WS 未连接'))
+      const requestId = payload.requestId || ('client_ws_' + Date.now().toString(36) + '_' + (++state.seq))
+      const body = { ...payload, operation, requestId }
+      return new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          state.pending.delete(requestId)
+          reject(new Error('业务 WS 等待响应超时'))
+        }, timeoutMs || 45000)
+        state.pending.set(requestId, { resolve, reject, timer })
+        try { state.ws.send(JSON.stringify(body)) } catch (error) {
+          window.clearTimeout(timer)
+          state.pending.delete(requestId)
+          reject(error)
+        }
+      })
+    }
+
+    function persistConfig() {
+      window.localStorage.setItem('rulego_public_demo_server_url', serviceUrl())
+      window.localStorage.setItem('rulego_public_demo_api_base', apiBase())
+      window.localStorage.setItem('rulego_public_demo_chain_id', chainId())
+      window.localStorage.setItem('rulego_public_demo_tenant_id', els.tenantId.value.trim())
+      window.localStorage.setItem('rulego_public_demo_channel', els.channel.value.trim())
+      saveBrowserIdentity(els.userId.value.trim(), els.sessionId.value.trim())
+      window.localStorage.setItem('rulego_public_demo_business_ws_url', els.businessWsUrl.value.trim())
+      updatePills()
+    }
+
+    function initDefaults() {
+      const initialApiBase = queryParam('apiBase') || window.localStorage.getItem('rulego_public_demo_api_base') || resolveDefaultApiBase()
+      const browserIdentity = readBrowserIdentity()
+      els.serverUrl.value = queryParam('serverUrl') || window.localStorage.getItem('rulego_public_demo_server_url') || serviceUrlFromApiBase(initialApiBase)
+      els.apiBase.value = queryParam('apiBase') || apiBaseFromServiceUrl(els.serverUrl.value) || initialApiBase
+      els.chainId.value = queryParam('chainId') || window.localStorage.getItem('rulego_public_demo_chain_id') || DEFAULT_CHAIN_ID
+      els.tenantId.value = queryParam('tenantId') || window.localStorage.getItem('rulego_public_demo_tenant_id') || 'default'
+      els.channel.value = queryParam('channel') || window.localStorage.getItem('rulego_public_demo_channel') || 'web'
+      els.userId.value = queryParam('userId') || browserIdentity.userId
+      els.sessionId.value = queryParam('sessionId') || browserIdentity.sessionId
+      els.businessWsUrl.value = queryParam('businessWsUrl') || window.localStorage.getItem('rulego_public_demo_business_ws_url') || defaultWsUrl()
+      state.token = queryParam('token') || queryParam('accessToken') || window.sessionStorage.getItem(TOKEN_STORAGE_KEY) || ''
+      state.accessBlocked = false
+      saveBrowserIdentity(els.userId.value, els.sessionId.value)
+      updatePills()
+      setWsPill('实时未连接', '')
+      setHistoryPill('历史未同步', '')
+      setAgentPill('AI 自动', '')
+      setDeliveryState('idle', '可以开始咨询', '消息发送后会实时显示客服处理状态', '')
+      if (state.token) {
+        setStatus('客户访问 Token 已就绪', 'ok')
+      } else {
+        setStatus('公开客服入口', '')
+      }
+      startHistoryTimer()
+      window.setTimeout(() => connectWs(), 100)
+      window.setTimeout(() => syncHistory('init'), 180)
+      renderMessages()
+    }
+
+    function resetConversationForIdentity(statusText) {
+      persistConfig()
+      state.messages = []
+      renderMessages()
+      closeWs(statusText || 'identity changed')
+      if (!state.accessBlocked) {
+        connectWs()
+        syncHistory('identity')
+      }
+      setStatus(statusText || '已切换浏览器身份', state.accessBlocked ? 'warning' : 'ok')
+    }
+
+    function resetBrowserIdentity() {
+      const suffix = newIdentitySuffix()
+      els.userId.value = 'customer_' + suffix
+      els.sessionId.value = 'web_' + suffix
+      resetConversationForIdentity('已重置浏览器客户身份')
+      setDeliveryState('idle', '新客户会话已就绪', '可以发送第一条咨询消息', new Date())
+    }
+
+    function createNewSession() {
+      els.sessionId.value = 'web_' + newIdentitySuffix()
+      resetConversationForIdentity('已生成新会话')
+      setDeliveryState('idle', '新会话已就绪', '客户身份保持不变，可以继续咨询', new Date())
+    }
+
+    function startHistoryTimer() {
+      stopHistoryTimer()
+      state.historyTimer = window.setInterval(() => syncHistory('auto'), HISTORY_INTERVAL_MS)
+    }
+
+    function stopHistoryTimer() {
+      if (state.historyTimer) {
+        window.clearInterval(state.historyTimer)
+        state.historyTimer = 0
+      }
+    }
+
+    function setAccessPanelExpanded(expanded) {
+      els.configPanel.classList.toggle('collapsed', !expanded)
+      els.configToggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+      els.configToggleBtn.textContent = expanded ? '收起' : '服务'
+    }
+
+    function retryCurrentAccess(reason) {
+      state.accessBlocked = false
+      startHistoryTimer()
+      closeWs(reason || 'access changed')
+      connectWs()
+      syncHistory(reason || 'access')
+    }
+
+    els.configToggleBtn.addEventListener('click', () => {
+      setAccessPanelExpanded(els.configPanel.classList.contains('collapsed'))
+    })
+    els.wsToggleBtn.addEventListener('click', async () => {
+      if (state.ws) closeWs('manual')
+      else await connectWs()
+    })
+    els.syncHistoryBtn.addEventListener('click', () => syncHistory('manual'))
+    els.sendBtn.addEventListener('click', sendMessage)
+    els.messageInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault()
+        sendMessage()
+      }
+    })
+    document.querySelectorAll('.quick-fill').forEach(button => {
+      button.addEventListener('click', () => {
+        els.messageInput.value = button.dataset.text || ''
+        els.messageInput.focus()
+      })
+    })
+    els.serverUrl.addEventListener('change', () => {
+      updateApiFromServiceUrl({ forceWs: true })
+      retryCurrentAccess('server')
+    })
+    els.chainId.addEventListener('change', () => {
+      persistConfig()
+      retryCurrentAccess('chain')
+    })
+    els.resetIdentityBtn.addEventListener('click', resetBrowserIdentity)
+    els.newSessionBtn.addEventListener('click', createNewSession)
+    window.addEventListener('beforeunload', () => {
+      stopHistoryTimer()
+      closeWs('page unload')
+      try { state.signalChannel?.close() } catch { /* ignored */ }
+    })
+
+    initDefaults()
+  </script>
+</body>
+</html>

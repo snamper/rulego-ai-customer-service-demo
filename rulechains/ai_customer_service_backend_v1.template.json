@@ -1,0 +1,1536 @@
+{
+  "ruleChain": {
+    "id": "ai_customer_service_backend_v1",
+    "name": "AI智能客服后端",
+    "debugMode": true,
+    "root": true,
+    "disabled": false,
+    "additionalInfo": {
+      "category": "ai-customer-service",
+      "description": "可直接通过 /execute/CUSTOMER_MESSAGE 调用的 AI 智能客服后端：用户隔离、上下文缓存、确定性意图预判、AI 兜底分类、多能力 Skill 分支、可选业务接口调用、OpenAI 兼容真实回复、人工辅助记录。",
+      "debugModeNote": "Test scenario enables debugMode on all nodes for customer-service flow verification."
+    }
+  },
+  "metadata": {
+    "firstNodeIndex": 0,
+    "nodes": [
+      {
+        "id": "n0_operation_route",
+        "additionalInfo": {
+          "layoutX": 80,
+          "layoutY": 280
+        },
+        "type": "jsSwitch",
+        "name": "客服操作路由",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nfunction parsePayload(value) {\n  if (value == null) return {};\n  if (typeof value === 'object') return value;\n  if (typeof value === 'string') {\n    var text = value.trim();\n    if (!text) return {};\n    try {\n      var parsed = JSON.parse(text);\n      return parsed && typeof parsed === 'object' ? parsed : { text: text };\n    } catch (e) {\n      return { text: text };\n    }\n  }\n  return { value: value };\n}\nmsg = parsePayload(msg);\nfunction upper(value) { return String(value == null ? '' : value).trim().toUpperCase(); }\nvar metadataMsgType = metadata.msgType || metadata.MsgType || metadata._msgType || metadata.messageType || metadata.type;\nvar operation = upper(msg.operation || msg.action || msg.task || msg.event || msg.type || metadata.csOperation || metadata.operation || metadataMsgType || msgType);\nif (operation === 'CUSTOMER_LIST' || operation === 'LIST_CUSTOMERS' || operation === 'LIST_SESSIONS') return ['CUSTOMER_LIST'];\nif (operation === 'CONVERSATION_HISTORY' || operation === 'CUSTOMER_HISTORY' || operation === 'GET_HISTORY') return ['CONVERSATION_HISTORY'];\nif (operation === 'SCHEDULE_MAINTAIN' || operation === 'MAINTAIN_CUSTOMER_INDEX' || operation === 'CUSTOMER_SESSION_MAINTENANCE') return ['SCHEDULE_MAINTAIN'];\nif (operation === 'RESPONSE_REPORT' || operation === 'REPORT' || operation === 'RESPONSE_STATS' || operation === 'STATS' || operation === 'STATISTICS') return ['RESPONSE_REPORT'];\nif (operation === 'QUICK_INPUTS' || operation === 'CUSTOMER_QUICK_INPUTS' || operation === 'LIST_QUICK_INPUTS') return ['QUICK_INPUTS'];\nif (operation === 'CUSTOMER_PROFILE_UPSERT' || operation === 'CUSTOMER_PROFILE_UPDATE' || operation === 'SAVE_CUSTOMER_PROFILE' || operation === 'UPDATE_CUSTOMER_PROFILE') return ['CUSTOMER_PROFILE_UPSERT'];\nif (operation === 'HUMAN_INTERVENTION' || operation === 'MANUAL_INTERVENTION' || operation === 'HUMAN_REPLY' || operation === 'HANDOFF_UPDATE' || operation === 'HUMAN_TAKEOVER') return ['HUMAN_INTERVENTION'];\nif (operation === 'AGENT_LIST' || operation === 'LIST_AGENTS' || operation === 'SERVICE_AGENT_LIST') return ['AGENT_LIST'];\nif (operation === 'AGENT_UPSERT' || operation === 'SAVE_AGENT' || operation === 'SERVICE_AGENT_UPSERT') return ['AGENT_UPSERT'];\nreturn ['CUSTOMER_MESSAGE'];"
+        }
+      },
+      {
+        "id": "n1_normalize",
+        "additionalInfo": {
+          "layoutX": 260,
+          "layoutY": 280
+        },
+        "type": "jsTransform",
+        "name": "标准化输入与隔离键",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction cleanPart(value, fallback) {\n  var text = String(value == null ? '' : value).trim();\n  return text || fallback;\n}\nfunction keyPart(value) {\n  var text = String(value == null ? '' : value).trim();\n  if (typeof encodeURIComponent === 'function') return encodeURIComponent(text);\n  return text.replace(/[^A-Za-z0-9_.@-]/g, '_');\n}\nfunction nowIso() { return new Date().toISOString(); }\nvar profile = (msg.customerProfile && typeof msg.customerProfile === 'object') ? msg.customerProfile : {};\nvar tenantId = cleanPart(msg.tenantId || profile.tenantId || metadata.tenantId, 'default');\nvar channel = cleanPart(msg.channel || profile.channel || metadata.channel, 'web');\nvar userId = cleanPart(msg.userId || msg.customerId || msg.openId || profile.userId || metadata.userId, 'anonymous');\nvar sessionId = cleanPart(msg.sessionId || msg.conversationId || profile.sessionId || userId, userId);\nvar isolationKey = cleanPart(msg.isolationKey || msg.contextKey || '', '');\nvar computedIsolationKey = [tenantId, channel, userId, sessionId].map(keyPart).join(':');\nif (!isolationKey || isolationKey !== computedIsolationKey) isolationKey = computedIsolationKey;\nfunction sameIdentity(item) {\n  if (!item || typeof item !== 'object') return false;\n  var itemKey = String(item.isolationKey || item.contextKey || item.sessionKey || '').trim();\n  if (itemKey) return itemKey === isolationKey;\n  var hasIdentity = item.tenantId || item.channel || item.userId || item.sessionId;\n  if (!hasIdentity) return msg.allowUnscopedHistory === true;\n  if (item.tenantId && String(item.tenantId) !== tenantId) return false;\n  if (item.channel && String(item.channel) !== channel) return false;\n  if (item.userId && String(item.userId) !== userId) return false;\n  if (item.sessionId && String(item.sessionId) !== sessionId) return false;\n  return true;\n}\nfunction normalizeHistoryItem(item) {\n  if (!sameIdentity(item)) return null;\n  var content = item.content == null ? '' : String(item.content);\n  if (!content) return null;\n  return { role: String(item.role || 'user'), content: content, tenantId: tenantId, channel: channel, userId: userId, sessionId: sessionId, isolationKey: isolationKey, ts: item.ts || item.time || '', id:item.id || item.messageId || '', author:item.author || item.operator || '', operator:item.operator || item.author || '', source:item.source || '', action:item.action || item.actionType || '' };\n}\nvar rawHistory = Array.isArray(msg.history) ? msg.history : [];\nvar requestHistory = [];\nfor (var i = 0; i < rawHistory.length; i++) {\n  var item = normalizeHistoryItem(rawHistory[i]);\n  if (item) requestHistory.push(item);\n}\nvar integrationEndpoints = {};\nif (profile.integrationEndpoints && typeof profile.integrationEndpoints === 'object') integrationEndpoints = profile.integrationEndpoints;\nif (msg.integrationEndpoints && typeof msg.integrationEndpoints === 'object') integrationEndpoints = msg.integrationEndpoints;\nvar normalized = {\n  tenantId: tenantId,\n  sessionId: sessionId,\n  userId: userId,\n  channel: channel,\n  isolationKey: isolationKey,\n  contextCacheKey: 'cs:session:' + isolationKey,\n  customerCacheKey: 'cs:customer:' + [tenantId, channel, userId].map(keyPart).join(':'),\n  requestId: 'cs_' + Date.now() + '_' + Math.floor(Math.random() * 100000),\n  messageId: String(msg.messageId || msg.clientMessageId || ''),\n  clientMessageId: String(msg.clientMessageId || msg.messageId || ''),\n  text: String(msg.text || msg.content || ''),\n  requestHistory: requestHistory.slice(-12),\n  history: requestHistory.slice(-12),\n  droppedHistoryCount: rawHistory.length - requestHistory.length,\n  customerProfile: profile,\n  integrationEndpoints: integrationEndpoints,\n  skillHints: Array.isArray(msg.skillHints) ? msg.skillHints : [],\n  receivedAt: nowIso()\n};\nnormalized.sessionMemory = { tenantId: tenantId, sessionId: sessionId, userId: userId, channel: channel, isolationKey: isolationKey, recentHistory: normalized.history.slice(-10), slots: {}, droppedHistoryCount: normalized.droppedHistoryCount, updatedAt: normalized.receivedAt };\nnormalized.chatLog = normalized.history.slice();\nnormalized.chatLog.push({ id:normalized.messageId, clientMessageId:normalized.clientMessageId, role:'user', content: normalized.text, tenantId: tenantId, channel: channel, userId: userId, sessionId: sessionId, isolationKey: isolationKey, ts: normalized.receivedAt });\nnormalized.skillMatches = normalized.skillHints.slice();\nmetadata.tenantId = tenantId;\nmetadata.channel = channel;\nmetadata.userId = userId;\nmetadata.sessionId = sessionId;\nmetadata.csIsolationKey = isolationKey;\nmetadata.csContextCacheKey = normalized.contextCacheKey;\nmetadata.csRequestId = normalized.requestId;\nmetadata.csContext = JSON.stringify(normalized);\nmsg = normalized;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n2_cache_get",
+        "additionalInfo": {
+          "layoutX": 500,
+          "layoutY": 280
+        },
+        "type": "cacheGet",
+        "name": "读取会话上下文缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain"
+            },
+            {
+              "key": "${msg.customerCacheKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n3_merge_context",
+        "additionalInfo": {
+          "layoutX": 740,
+          "layoutY": 280
+        },
+        "type": "jsTransform",
+        "name": "合并缓存上下文",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybeJson(value) {\n  if (!value) return null;\n  if (typeof value === 'object') return value;\n  if (typeof value === 'string') {\n    try { return JSON.parse(value); } catch(e) { return null; }\n  }\n  return null;\n}\nfunction same(item) {\n  if (!item || typeof item !== 'object') return false;\n  if (item.isolationKey) return String(item.isolationKey) === String(msg.isolationKey);\n  if (item.tenantId && String(item.tenantId) !== String(msg.tenantId)) return false;\n  if (item.channel && String(item.channel) !== String(msg.channel)) return false;\n  if (item.userId && String(item.userId) !== String(msg.userId)) return false;\n  if (item.sessionId && String(item.sessionId) !== String(msg.sessionId)) return false;\n  return !!(item.role && item.content);\n}\nfunction normalizeItem(item) {\n  if (!same(item)) return null;\n  return { role: String(item.role || 'user'), content: String(item.content || ''), tenantId: msg.tenantId, channel: msg.channel, userId: msg.userId, sessionId: msg.sessionId, isolationKey: msg.isolationKey, ts: item.ts || '', id:item.id || item.messageId || '', clientMessageId:item.clientMessageId || '', author:item.author || item.operator || '', operator:item.operator || item.author || '', source:item.source || '', action:item.action || item.actionType || '' };\n}\nvar cached = parseMaybeJson(msg[msg.contextCacheKey]);\nvar cachedCustomerRecord = parseMaybeJson(msg[msg.customerCacheKey]) || {};\nvar cachedCustomerProfile = cachedCustomerRecord.customerProfile && typeof cachedCustomerRecord.customerProfile === 'object' ? cachedCustomerRecord.customerProfile : cachedCustomerRecord;\nvar sessionProfile = cached && cached.customerProfile && typeof cached.customerProfile === 'object' ? cached.customerProfile : {};\nvar requestProfile = msg.customerProfile && typeof msg.customerProfile === 'object' ? msg.customerProfile : {};\nmsg.customerProfile = Object.assign({}, cachedCustomerProfile || {}, sessionProfile, requestProfile);\nmsg.businessContext = Object.assign({}, cachedCustomerRecord.businessContext || {}, (cached && cached.businessContext) || {}, msg.businessContext || {});\nmsg.successCriteria = Array.isArray(msg.successCriteria) && msg.successCriteria.length ? msg.successCriteria : (Array.isArray(cachedCustomerRecord.successCriteria) ? cachedCustomerRecord.successCriteria : ((cached && Array.isArray(cached.successCriteria)) ? cached.successCriteria : []));\nvar cachedHistory = [];\nif (cached) {\n  var source = Array.isArray(cached.chatLog) ? cached.chatLog : (Array.isArray(cached.recentHistory) ? cached.recentHistory : []);\n  for (var i = 0; i < source.length; i++) {\n    var h = normalizeItem(source[i]);\n    if (h) cachedHistory.push(h);\n  }\n}\nvar requestHistory = Array.isArray(msg.requestHistory) ? msg.requestHistory : [];\nvar merged = [];\nvar seen = {};\nfunction add(item) {\n  var h = normalizeItem(item);\n  if (!h || !h.content) return;\n  var key = h.role + '|' + h.content + '|' + (h.ts || '');\n  if (seen[key]) return;\n  seen[key] = true;\n  merged.push(h);\n}\nfor (var a = 0; a < cachedHistory.length; a++) add(cachedHistory[a]);\nfor (var b = 0; b < requestHistory.length; b++) add(requestHistory[b]);\nmerged = merged.slice(-12);\nvar slots = (cached && cached.slots && typeof cached.slots === 'object') ? cached.slots : {};\nmsg.cachedContextFound = !!cached;\nmsg.history = merged;\nmsg.chatLog = merged.slice();\nvar duplicateCurrentMessage = false;\nfor (var currentIndex = 0; currentIndex < msg.chatLog.length; currentIndex++) { var currentItem = msg.chatLog[currentIndex]; if (msg.clientMessageId && String(currentItem.clientMessageId || currentItem.id || '') === String(msg.clientMessageId)) { duplicateCurrentMessage = true; break; } }\nif (!duplicateCurrentMessage) msg.chatLog.push({ id:msg.messageId, clientMessageId:msg.clientMessageId, role:'user', content: msg.text, tenantId: msg.tenantId, channel: msg.channel, userId: msg.userId, sessionId: msg.sessionId, isolationKey: msg.isolationKey, ts: msg.receivedAt });\nmsg.sessionMemory = { tenantId: msg.tenantId, channel: msg.channel, userId: msg.userId, sessionId: msg.sessionId, isolationKey: msg.isolationKey, slots: slots, recentHistory: merged.slice(-10), customerProfile: msg.customerProfile, businessContext: msg.businessContext, successCriteria: msg.successCriteria, assignedAgent: (cached && cached.assignedAgent) || null, agentStatus: (cached && cached.agentStatus) || 'ai_auto', aiAutoContinue: !(cached && cached.aiAutoContinue === false), cachedContextFound: !!cached, cachedCustomerFound: !!Object.keys(cachedCustomerRecord).length, droppedHistoryCount: msg.droppedHistoryCount || 0, updatedAt: msg.receivedAt };\nmsg.intentInput = JSON.stringify({text:msg.text, history:msg.history.slice(-6), sessionMemory:msg.sessionMemory, customerProfile:msg.customerProfile, businessContext:msg.businessContext, skillHints:msg.skillHints});\nmetadata.csContext = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n4_intent",
+        "additionalInfo": {
+          "layoutX": 1180,
+          "layoutY": 760
+        },
+        "type": "ai/intent",
+        "name": "AI识别客户意图",
+        "debugMode": true,
+        "configuration": {
+          "defaultIntent": "other",
+          "input": "${msg.intentInput}",
+          "intents": [
+            {
+              "description": "查询订单状态、物流、发货、配送、运单、签收、订单进度",
+              "name": "order_query"
+            },
+            {
+              "description": "退款、退货、换货、售后、质量问题、申诉、赔付",
+              "name": "refund_after_sales"
+            },
+            {
+              "description": "产品使用、安装配置、故障排查、错误码、无法使用",
+              "name": "technical_support"
+            },
+            {
+              "description": "明确要求人工客服、投诉、升级、强烈不满、紧急人工关注",
+              "name": "human_handoff"
+            },
+            {
+              "description": "服务时间、政策、收费、规则、常见问题、基础说明",
+              "name": "faq"
+            },
+            {
+              "description": "无法归入以上类别的其他客服诉求",
+              "name": "other"
+            }
+          ],
+          "key": "${global.llm_api_key}",
+          "model": "${global.llm_model}",
+          "systemPrompt": "你是客服意图分类器。输入是 JSON，包含 text、history、sessionMemory、skillHints。请结合当前文本和同一 isolationKey 的上下文判断意图。只输出一个意图名称，不要解释，不要标点，不要 JSON，不要 Markdown。\n\n可选意图：order_query、refund_after_sales、technical_support、human_handoff、faq、other。\n\n优先级：\n1. 明确要求人工、投诉、升级、强烈不满，输出 human_handoff。\n2. 当前文本或上下文包含订单号、物流、发货、配送、签收、包裹、运单、订单进度，且当前文本是继续追问/查询，输出 order_query。\n3. 退款、退货、换货、售后、质量问题，输出 refund_after_sales。\n4. 错误码、无法使用、安装配置、技术排查，输出 technical_support。\n5. 服务时间、费用、规则、政策、常见问题，输出 faq。\n6. 其他输出 other。",
+          "url": "${global.llm_url}"
+        }
+      },
+      {
+        "id": "n5_order",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 80
+        },
+        "type": "jsTransform",
+        "name": "订单查询Skill",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "msg.intent = \"order_query\";\nvar text = String(msg.text || '');\nvar urgent = /(投诉|转人工|人工客服|强烈不满|非常不满|升级处理|没人处理|立刻|马上|投诉)/.test(text);\nmsg.needHuman = urgent;\nvar orderMatch = text.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nmsg.orderNo = msg.sessionMemory.slots.orderNo || '';\nmsg.skillMatches = [{name:\"order_status_skill\", intent:\"order_query\", confidence:0.88, source:'rulego-skill-branch', description:\"订单查询 Skill：提取订单号，按订单/物流/发货/配送/签收诉求组织查询动作；如果没有真实订单接口返回，不能编造状态。\"}].concat(Array.isArray(msg.skillMatches) ? msg.skillMatches : []);\nmsg.knowledgeContext = {name:\"order_status_skill\", intent:\"order_query\", facts:\"订单查询需要订单号、手机号尾号或用户身份；如果 customerProfile.integrationEndpoints.orderStatusUrl 存在，规则链会调用订单系统接口。\", constraints:['严格按当前 isolationKey 的上下文回答','不得编造订单/退款/物流/工单真实状态','需要说明下一步动作和缺失字段','语气专业克制']};\nmsg.actions = [\"extract_order_no\",\"query_order_status\",\"explain_logistics_delay\",\"ask_missing_order_no\"];\nmsg.functionCalls = msg.functionCalls || [];\nfor (var i=0; i<msg.actions.length; i++) msg.functionCalls.push({name:msg.actions[i], skill:\"order_status_skill\", status:'planned'});\nmsg.sessionMemory.lastIntent = msg.intent;\nmsg.sessionMemory.needHuman = msg.needHuman;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.integrationEndpoints = msg.integrationEndpoints || {};\nmsg.orderStatusUrl = msg.integrationEndpoints.orderStatusUrl || msg.customerProfile.orderStatusUrl || '';\nmsg.aiInput = JSON.stringify({tenantId:msg.tenantId,channel:msg.channel,userId:msg.userId,sessionId:msg.sessionId,isolationKey:msg.isolationKey,text:msg.text,history:msg.history,customerProfile:msg.customerProfile,integrationEndpoints:msg.integrationEndpoints,intent:msg.intent,needHuman:msg.needHuman,sessionMemory:msg.sessionMemory,chatLog:msg.chatLog,skillMatches:msg.skillMatches,knowledgeContext:msg.knowledgeContext,actions:msg.actions,functionCalls:msg.functionCalls,cachedContextFound:msg.cachedContextFound});\nmetadata.intent = msg.intent;\nmetadata.needHuman = String(msg.needHuman);\nmetadata.csAiInput = msg.aiInput;\nmetadata.beforeExternal = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n5_order_has_api",
+        "additionalInfo": {
+          "layoutX": 1480,
+          "layoutY": 80
+        },
+        "type": "jsFilter",
+        "name": "是否有订单系统接口",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "return !!(msg.orderStatusUrl);"
+        }
+      },
+      {
+        "id": "n5_order_api",
+        "additionalInfo": {
+          "layoutX": 1720,
+          "layoutY": 40
+        },
+        "type": "restApiCall",
+        "name": "调用订单系统接口",
+        "debugMode": true,
+        "configuration": {
+          "body": "{\"orderNo\":\"${msg.orderNo}\",\"userId\":\"${msg.userId}\",\"sessionId\":\"${msg.sessionId}\",\"isolationKey\":\"${msg.isolationKey}\"}",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "insecureSkipVerify": true,
+          "readTimeoutMs": 5000,
+          "requestMethod": "POST",
+          "restEndpointUrlPattern": "${msg.orderStatusUrl}"
+        }
+      },
+      {
+        "id": "n5_order_api_merge",
+        "additionalInfo": {
+          "layoutX": 1960,
+          "layoutY": 40
+        },
+        "type": "jsTransform",
+        "name": "合并订单接口结果",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "function parseMaybe(value){ if (value && typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return {raw:value}; } } return {}; }\nvar previous = parseMaybe(metadata.beforeExternal);\nvar response = parseMaybe(msg);\nprevious.externalResults = previous.externalResults || {};\nprevious.externalResults.orderStatus = {success:true, response:response, statusCode: metadata.statusCode || metadata.status || ''};\nprevious.functionCalls = previous.functionCalls || [];\nprevious.functionCalls.push({name:'restApiCall.orderStatus', skill:'order_status_skill', status:'success', statusCode: metadata.statusCode || metadata.status || ''});\nprevious.aiInput = JSON.stringify({tenantId:previous.tenantId,channel:previous.channel,userId:previous.userId,sessionId:previous.sessionId,isolationKey:previous.isolationKey,text:previous.text,history:previous.history,customerProfile:previous.customerProfile,integrationEndpoints:previous.integrationEndpoints,intent:previous.intent,needHuman:previous.needHuman,sessionMemory:previous.sessionMemory,chatLog:previous.chatLog,skillMatches:previous.skillMatches,knowledgeContext:previous.knowledgeContext,actions:previous.actions,functionCalls:previous.functionCalls,externalResults:previous.externalResults,cachedContextFound:previous.cachedContextFound});\nmetadata.csAiInput = previous.aiInput;\nmsg = previous;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n5_order_api_error",
+        "additionalInfo": {
+          "layoutX": 1960,
+          "layoutY": 120
+        },
+        "type": "jsTransform",
+        "name": "记录订单接口失败",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "function parseMaybe(value){ if (value && typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return {}; } } return {}; }\nvar previous = parseMaybe(metadata.beforeExternal);\nprevious.externalResults = previous.externalResults || {};\nprevious.externalResults.orderStatus = {success:false, statusCode: metadata.statusCode || metadata.status || '', errorBody: metadata.errorBody || ''};\nprevious.functionCalls = previous.functionCalls || [];\nprevious.functionCalls.push({name:'restApiCall.orderStatus', skill:'order_status_skill', status:'failed', statusCode: metadata.statusCode || metadata.status || '', errorBody: metadata.errorBody || ''});\nprevious.aiInput = JSON.stringify({tenantId:previous.tenantId,channel:previous.channel,userId:previous.userId,sessionId:previous.sessionId,isolationKey:previous.isolationKey,text:previous.text,history:previous.history,customerProfile:previous.customerProfile,integrationEndpoints:previous.integrationEndpoints,intent:previous.intent,needHuman:previous.needHuman,sessionMemory:previous.sessionMemory,chatLog:previous.chatLog,skillMatches:previous.skillMatches,knowledgeContext:previous.knowledgeContext,actions:previous.actions,functionCalls:previous.functionCalls,externalResults:previous.externalResults,cachedContextFound:previous.cachedContextFound});\nmetadata.csAiInput = previous.aiInput;\nmsg = previous;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n6_after",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 200
+        },
+        "type": "jsTransform",
+        "name": "售后退款Skill",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "msg.intent = \"refund_after_sales\";\nvar text = String(msg.text || '');\nvar urgent = /(投诉|转人工|人工客服|强烈不满|非常不满|升级处理|没人处理|立刻|马上|投诉)/.test(text);\nmsg.needHuman = urgent;\nvar orderMatch = text.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nmsg.orderNo = msg.sessionMemory.slots.orderNo || '';\nmsg.skillMatches = [{name:\"after_sales_skill\", intent:\"refund_after_sales\", confidence:0.88, source:'rulego-skill-branch', description:\"售后 Skill：处理退款、退货、换货、质量问题、申诉升级，收集凭证并生成处理动作。\"}].concat(Array.isArray(msg.skillMatches) ? msg.skillMatches : []);\nmsg.knowledgeContext = {name:\"after_sales_skill\", intent:\"refund_after_sales\", facts:\"售后处理需要订单号、问题描述、图片凭证和期望方案；没有真实售后系统结果时不能承诺退款成功。\", constraints:['严格按当前 isolationKey 的上下文回答','不得编造订单/退款/物流/工单真实状态','需要说明下一步动作和缺失字段','语气专业克制']};\nmsg.actions = [\"collect_after_sales_evidence\",\"create_after_sales_ticket\",\"explain_refund_policy\",\"escalate_if_complaint\"];\nmsg.functionCalls = msg.functionCalls || [];\nfor (var i=0; i<msg.actions.length; i++) msg.functionCalls.push({name:msg.actions[i], skill:\"after_sales_skill\", status:'planned'});\nmsg.sessionMemory.lastIntent = msg.intent;\nmsg.sessionMemory.needHuman = msg.needHuman;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.aiInput = JSON.stringify({tenantId:msg.tenantId,channel:msg.channel,userId:msg.userId,sessionId:msg.sessionId,isolationKey:msg.isolationKey,text:msg.text,history:msg.history,customerProfile:msg.customerProfile,integrationEndpoints:msg.integrationEndpoints,intent:msg.intent,needHuman:msg.needHuman,sessionMemory:msg.sessionMemory,chatLog:msg.chatLog,skillMatches:msg.skillMatches,knowledgeContext:msg.knowledgeContext,actions:msg.actions,functionCalls:msg.functionCalls,cachedContextFound:msg.cachedContextFound});\nmetadata.intent = msg.intent;\nmetadata.needHuman = String(msg.needHuman);\nmetadata.csAiInput = msg.aiInput;\nmetadata.beforeExternal = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n7_tech",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 320
+        },
+        "type": "jsTransform",
+        "name": "技术支持Skill",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "msg.intent = \"technical_support\";\nvar text = String(msg.text || '');\nvar urgent = /(投诉|转人工|人工客服|强烈不满|非常不满|升级处理|没人处理|立刻|马上|投诉)/.test(text);\nmsg.needHuman = urgent;\nvar orderMatch = text.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nmsg.orderNo = msg.sessionMemory.slots.orderNo || '';\nmsg.skillMatches = [{name:\"technical_support_skill\", intent:\"technical_support\", confidence:0.88, source:'rulego-skill-branch', description:\"技术支持 Skill：处理产品使用、安装配置、错误码、故障排查。\"}].concat(Array.isArray(msg.skillMatches) ? msg.skillMatches : []);\nmsg.knowledgeContext = {name:\"technical_support_skill\", intent:\"technical_support\", facts:\"技术排查需要产品型号、环境、错误码、复现步骤；优先给出安全的排查步骤。\", constraints:['严格按当前 isolationKey 的上下文回答','不得编造订单/退款/物流/工单真实状态','需要说明下一步动作和缺失字段','语气专业克制']};\nmsg.actions = [\"collect_device_context\",\"provide_troubleshooting_steps\",\"ask_for_error_code\",\"create_support_ticket\"];\nmsg.functionCalls = msg.functionCalls || [];\nfor (var i=0; i<msg.actions.length; i++) msg.functionCalls.push({name:msg.actions[i], skill:\"technical_support_skill\", status:'planned'});\nmsg.sessionMemory.lastIntent = msg.intent;\nmsg.sessionMemory.needHuman = msg.needHuman;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.aiInput = JSON.stringify({tenantId:msg.tenantId,channel:msg.channel,userId:msg.userId,sessionId:msg.sessionId,isolationKey:msg.isolationKey,text:msg.text,history:msg.history,customerProfile:msg.customerProfile,integrationEndpoints:msg.integrationEndpoints,intent:msg.intent,needHuman:msg.needHuman,sessionMemory:msg.sessionMemory,chatLog:msg.chatLog,skillMatches:msg.skillMatches,knowledgeContext:msg.knowledgeContext,actions:msg.actions,functionCalls:msg.functionCalls,cachedContextFound:msg.cachedContextFound});\nmetadata.intent = msg.intent;\nmetadata.needHuman = String(msg.needHuman);\nmetadata.csAiInput = msg.aiInput;\nmetadata.beforeExternal = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n8_faq",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 440
+        },
+        "type": "jsTransform",
+        "name": "FAQ知识库Skill",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "msg.intent = \"faq\";\nvar text = String(msg.text || '');\nvar urgent = /(投诉|转人工|人工客服|强烈不满|非常不满|升级处理|没人处理|立刻|马上|投诉)/.test(text);\nmsg.needHuman = urgent;\nvar orderMatch = text.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nmsg.orderNo = msg.sessionMemory.slots.orderNo || '';\nmsg.skillMatches = [{name:\"faq_knowledge_skill\", intent:\"faq\", confidence:0.88, source:'rulego-skill-branch', description:\"FAQ Skill：处理服务时间、规则、费用、保修、常见问题。\"}].concat(Array.isArray(msg.skillMatches) ? msg.skillMatches : []);\nmsg.knowledgeContext = {name:\"faq_knowledge_skill\", intent:\"faq\", facts:\"FAQ 可回答通用政策；涉及账号、订单、合同的内容需要进一步核验。\", constraints:['严格按当前 isolationKey 的上下文回答','不得编造订单/退款/物流/工单真实状态','需要说明下一步动作和缺失字段','语气专业克制']};\nmsg.actions = [\"match_faq_article\",\"answer_with_policy\",\"ask_clarifying_question\"];\nmsg.functionCalls = msg.functionCalls || [];\nfor (var i=0; i<msg.actions.length; i++) msg.functionCalls.push({name:msg.actions[i], skill:\"faq_knowledge_skill\", status:'planned'});\nmsg.sessionMemory.lastIntent = msg.intent;\nmsg.sessionMemory.needHuman = msg.needHuman;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.aiInput = JSON.stringify({tenantId:msg.tenantId,channel:msg.channel,userId:msg.userId,sessionId:msg.sessionId,isolationKey:msg.isolationKey,text:msg.text,history:msg.history,customerProfile:msg.customerProfile,integrationEndpoints:msg.integrationEndpoints,intent:msg.intent,needHuman:msg.needHuman,sessionMemory:msg.sessionMemory,chatLog:msg.chatLog,skillMatches:msg.skillMatches,knowledgeContext:msg.knowledgeContext,actions:msg.actions,functionCalls:msg.functionCalls,cachedContextFound:msg.cachedContextFound});\nmetadata.intent = msg.intent;\nmetadata.needHuman = String(msg.needHuman);\nmetadata.csAiInput = msg.aiInput;\nmetadata.beforeExternal = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n9_handoff",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 560
+        },
+        "type": "jsTransform",
+        "name": "人工关注Skill",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "msg.intent = \"human_handoff\";\nvar text = String(msg.text || '');\nvar urgent = /(投诉|转人工|人工客服|强烈不满|非常不满|升级处理|没人处理|立刻|马上|投诉)/.test(text);\nmsg.needHuman = true;\nvar orderMatch = text.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nmsg.orderNo = msg.sessionMemory.slots.orderNo || '';\nmsg.skillMatches = [{name:\"human_handoff_skill\", intent:\"human_handoff\", confidence:0.88, source:'rulego-skill-branch', description:\"人工关注 Skill：处理投诉、升级、强烈不满、明确转人工；生成接续摘要和优先级。\"}].concat(Array.isArray(msg.skillMatches) ? msg.skillMatches : []);\nmsg.knowledgeContext = {name:\"human_handoff_skill\", intent:\"human_handoff\", facts:\"人工关注需要保留当前隔离键、最近上下文、客户诉求、已尝试动作和优先级。\", constraints:['严格按当前 isolationKey 的上下文回答','不得编造订单/退款/物流/工单真实状态','需要说明下一步动作和缺失字段','语气专业克制']};\nmsg.actions = [\"summarize_for_agent\",\"create_handoff_ticket\",\"mark_priority_high\",\"comfort_customer\"];\nmsg.functionCalls = msg.functionCalls || [];\nfor (var i=0; i<msg.actions.length; i++) msg.functionCalls.push({name:msg.actions[i], skill:\"human_handoff_skill\", status:'planned'});\nmsg.sessionMemory.lastIntent = msg.intent;\nmsg.sessionMemory.needHuman = msg.needHuman;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.aiInput = JSON.stringify({tenantId:msg.tenantId,channel:msg.channel,userId:msg.userId,sessionId:msg.sessionId,isolationKey:msg.isolationKey,text:msg.text,history:msg.history,customerProfile:msg.customerProfile,integrationEndpoints:msg.integrationEndpoints,intent:msg.intent,needHuman:msg.needHuman,sessionMemory:msg.sessionMemory,chatLog:msg.chatLog,skillMatches:msg.skillMatches,knowledgeContext:msg.knowledgeContext,actions:msg.actions,functionCalls:msg.functionCalls,cachedContextFound:msg.cachedContextFound});\nmetadata.intent = msg.intent;\nmetadata.needHuman = String(msg.needHuman);\nmetadata.csAiInput = msg.aiInput;\nmetadata.beforeExternal = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n10_other",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 680
+        },
+        "type": "jsTransform",
+        "name": "通用客服Skill",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "msg.intent = \"other\";\nvar text = String(msg.text || '');\nvar urgent = /(投诉|转人工|人工客服|强烈不满|非常不满|升级处理|没人处理|立刻|马上|投诉)/.test(text);\nmsg.needHuman = urgent;\nvar orderMatch = text.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nmsg.orderNo = msg.sessionMemory.slots.orderNo || '';\nmsg.skillMatches = [{name:\"general_service_skill\", intent:\"other\", confidence:0.88, source:'rulego-skill-branch', description:\"通用 Skill：处理未分类诉求，先澄清目标，再路由到最佳能力。\"}].concat(Array.isArray(msg.skillMatches) ? msg.skillMatches : []);\nmsg.knowledgeContext = {name:\"general_service_skill\", intent:\"other\", facts:\"无法分类时先澄清客户目标，不要臆测业务事实。\", constraints:['严格按当前 isolationKey 的上下文回答','不得编造订单/退款/物流/工单真实状态','需要说明下一步动作和缺失字段','语气专业克制']};\nmsg.actions = [\"clarify_user_goal\",\"route_to_best_skill\",\"ask_follow_up_question\"];\nmsg.functionCalls = msg.functionCalls || [];\nfor (var i=0; i<msg.actions.length; i++) msg.functionCalls.push({name:msg.actions[i], skill:\"general_service_skill\", status:'planned'});\nmsg.sessionMemory.lastIntent = msg.intent;\nmsg.sessionMemory.needHuman = msg.needHuman;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.aiInput = JSON.stringify({tenantId:msg.tenantId,channel:msg.channel,userId:msg.userId,sessionId:msg.sessionId,isolationKey:msg.isolationKey,text:msg.text,history:msg.history,customerProfile:msg.customerProfile,integrationEndpoints:msg.integrationEndpoints,intent:msg.intent,needHuman:msg.needHuman,sessionMemory:msg.sessionMemory,chatLog:msg.chatLog,skillMatches:msg.skillMatches,knowledgeContext:msg.knowledgeContext,actions:msg.actions,functionCalls:msg.functionCalls,cachedContextFound:msg.cachedContextFound});\nmetadata.intent = msg.intent;\nmetadata.needHuman = String(msg.needHuman);\nmetadata.csAiInput = msg.aiInput;\nmetadata.beforeExternal = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n12_fallback",
+        "additionalInfo": {
+          "layoutX": 2700,
+          "layoutY": 500
+        },
+        "type": "jsTransform",
+        "name": "AI失败兜底回复",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "function parseMaybe(value){ if (value && typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return {}; } } return {}; }\nfunction compactError(value) {\n  var text = String(value == null ? '' : value).trim();\n  if (!text) return '';\n  try {\n    var parsed = JSON.parse(text);\n    if (parsed && parsed.error) {\n      var err = parsed.error;\n      return [err.code || err.type || '', err.message || ''].filter(Boolean).join(': ') || text;\n    }\n  } catch(e) {}\n  return text;\n}\nvar input = parseMaybe(metadata.csAiInput) || msg || {};\nvar llmError = compactError(metadata.errorBody || metadata.error || metadata.err || metadata.statusCode || metadata.status || '') || '模型调用未返回可用响应';\nvar reply = '我已收到你的问题，会按当前会话继续处理。';\nif (input.needHuman) reply = '我理解你的着急，我已经把当前问题和上下文整理给人工客服，请稍等人工接入。';\nelse if (input.intent === 'order_query') reply = input.orderNo ? ('我已识别到订单号 ' + input.orderNo + '，接下来需要调用订单系统查询物流和订单状态；在没有真实查询结果前，我不会编造状态。') : '我可以帮你查询订单进度，请补充订单号或手机号尾号。';\nelse if (input.intent === 'refund_after_sales') reply = '我可以继续协助售后处理，请补充订单号、问题描述、图片凭证和你期望的处理方式。';\nelse if (input.intent === 'technical_support') reply = '我会按技术支持流程协助排查，请补充产品型号、错误码、出现时间和复现步骤。';\nelse if (input.intent === 'faq') reply = '我会根据常见问题和政策信息回答；如果你的问题涉及具体订单或账号，需要进一步核验。';\nvar chatLog = Array.isArray(input.chatLog) ? input.chatLog.slice() : [];\nchatLog.push({role:'assistant',content:reply,tenantId:input.tenantId,channel:input.channel,userId:input.userId,sessionId:input.sessionId,isolationKey:input.isolationKey,ts:new Date().toISOString(),source:'fallback generated',aiError:llmError});\nvar functionCalls = Array.isArray(input.functionCalls) ? input.functionCalls.slice() : [];\nif (llmError) {\n  functionCalls.push({name:'openai_compatible_chat_completion', skill:'ai_reply_generation', status:'failed', statusCode: metadata.statusCode || metadata.status || '', errorBody: llmError});\n}\nvar agentStatus = input.needHuman ? 'waiting_human' : 'ai_auto';\nvar sessionMemory = input.sessionMemory || {};\nsessionMemory.agentStatus = agentStatus;\nsessionMemory.aiAutoContinue = true;\nmsg = {reply:reply,intent:input.intent||'other',needHuman:!!input.needHuman,confidence:0.45,tenantId:input.tenantId||metadata.tenantId||'default',channel:input.channel||metadata.channel||'web',userId:input.userId||metadata.userId||'anonymous',sessionId:input.sessionId||metadata.sessionId||'',isolationKey:input.isolationKey||metadata.csIsolationKey||'',sessionMemory:sessionMemory,chatLog:chatLog,skillMatches:input.skillMatches||[],actions:input.actions||[],functionCalls:functionCalls,source:'fallback generated',aiError:llmError,llmError:llmError,handoffSummary:input.needHuman ? ('用户诉求：' + (input.text||'') + '；意图：' + (input.intent||'')) : '',agentStatus:agentStatus,aiAutoContinue:true};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n13_wrap",
+        "additionalInfo": {
+          "layoutX": 2940,
+          "layoutY": 280
+        },
+        "type": "jsTransform",
+        "name": "包装响应与上下文快照",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "function cleanFence(s) { s = String(s || '').trim(); var fence = String.fromCharCode(96,96,96); if (s.indexOf(fence + 'json') === 0) s = s.substring(7).trim(); else if (s.indexOf(fence) === 0) s = s.substring(3).trim(); if (s.lastIndexOf(fence) === s.length - 3) s = s.substring(0, s.length - 3).trim(); return s; }\nfunction parseMaybe(value){\n  if (value && typeof value === 'object' && !Array.isArray(value)) return value;\n  if (typeof value === 'string') {\n    var s = cleanFence(value);\n    try { return JSON.parse(s); } catch(e) { return {reply:s}; }\n  }\n  return {};\n}\nfunction parseInput(){ try { return JSON.parse(metadata.csBusinessContext || metadata.csAiInput || metadata.csContext || '{}'); } catch(e) { return {}; } }\nfunction normalizeLogItem(item, tenantId, channel, userId, sessionId, isolationKey) {\n  if (!item || typeof item !== 'object') return null;\n  var content = String(item.content == null ? '' : item.content);\n  if (!content) return null;\n  return {role:String(item.role || 'user'),content:content,tenantId:tenantId,channel:channel,userId:userId,sessionId:sessionId,isolationKey:isolationKey,ts:item.ts || item.time || new Date().toISOString(),id:item.id || item.messageId || '',clientMessageId:item.clientMessageId || '',author:item.author || item.operator || '',operator:item.operator || item.author || '',source:item.source || '',aiError:item.aiError || item.llmError || '',action:item.action || item.actionType || ''};\n}\nfunction mergeLog(target, source, tenantId, channel, userId, sessionId, isolationKey) {\n  var seen = {};\n  for (var s = 0; s < target.length; s++) seen[target[s].role + '|' + target[s].content + '|' + (target[s].ts || '')] = true;\n  var list = Array.isArray(source) ? source : [];\n  for (var i = 0; i < list.length; i++) {\n    var item = normalizeLogItem(list[i], tenantId, channel, userId, sessionId, isolationKey);\n    if (!item) continue;\n    var key = item.role + '|' + item.content + '|' + (item.ts || '');\n    var looseKey = item.role + '|' + item.content;\n    var duplicate = false;\n    for (var existing = 0; existing < target.length; existing++) {\n      if ((target[existing].role + '|' + target[existing].content) === looseKey) { duplicate = true; break; }\n    }\n    if (!seen[key] && !duplicate) { seen[key] = true; target.push(item); }\n  }\n}\nvar input = parseInput();\nvar parsed = parseMaybe(msg);\nvar tenantId = String(parsed.tenantId || input.tenantId || metadata.tenantId || 'default');\nvar channel = String(parsed.channel || input.channel || metadata.channel || 'web');\nvar userId = String(parsed.userId || input.userId || metadata.userId || 'anonymous');\nvar sessionId = String(parsed.sessionId || input.sessionId || metadata.sessionId || userId);\nvar isolationKey = String(parsed.isolationKey || input.isolationKey || metadata.csIsolationKey || '');\nvar intent = String(parsed.intent || input.intent || metadata.intent || 'other');\nvar needHuman = parsed.needHuman === true || String(parsed.needHuman) === 'true' || input.needHuman === true;\nvar reply = String(parsed.reply || (needHuman ? '我已收到你的诉求，已提示人工坐席关注；你也可以继续补充信息。' : '我已收到你的问题，会继续为你处理。'));\nvar assignedAgent = parsed.assignedAgent || input.assignedAgent || (input.sessionMemory && input.sessionMemory.assignedAgent) || null;\nvar agentStatus = String(parsed.agentStatus || (assignedAgent ? 'human_active' : (needHuman ? 'waiting_human' : 'ai_auto')));\nvar aiAutoContinue = parsed.aiAutoContinue !== false && !(input.sessionMemory && input.sessionMemory.aiAutoContinue === false);\nvar chatLog = [];\nmergeLog(chatLog, input.chatLog, tenantId, channel, userId, sessionId, isolationKey);\nmergeLog(chatLog, parsed.chatLog, tenantId, channel, userId, sessionId, isolationKey);\nvar requestText = String(parsed.requestText || input.text || metadata.csRequestText || '');\nvar hasUserRequest = false;\nfor (var u = 0; u < chatLog.length; u++) {\n  if (chatLog[u].role === 'user' && (!requestText || chatLog[u].content === requestText)) { hasUserRequest = true; break; }\n}\nif (requestText && !hasUserRequest) {\n  chatLog.unshift({id:input.messageId || input.clientMessageId || '',clientMessageId:input.clientMessageId || input.messageId || '',role:'user',content:requestText,tenantId:tenantId,channel:channel,userId:userId,sessionId:sessionId,isolationKey:isolationKey,ts:input.receivedAt || new Date().toISOString()});\n}\nvar hasAssistantReply = false;\nfor (var a = chatLog.length - 1; a >= 0; a--) {\n  if (chatLog[a].role === 'assistant' && chatLog[a].content === reply) { hasAssistantReply = true; break; }\n}\nif (!hasAssistantReply) chatLog.push({role:'assistant',content:reply,tenantId:tenantId,channel:channel,userId:userId,sessionId:sessionId,isolationKey:isolationKey,ts:new Date().toISOString(),source:parsed.source || '',aiError:parsed.aiError || parsed.llmError || '',author:parsed.operator || '',operator:parsed.operator || '',action:parsed.action || ''});\nelse { for (var enriched = chatLog.length - 1; enriched >= 0; enriched--) { if (chatLog[enriched].role === 'assistant' && chatLog[enriched].content === reply) { if (!chatLog[enriched].source) chatLog[enriched].source = parsed.source || ''; if (!chatLog[enriched].aiError) chatLog[enriched].aiError = parsed.aiError || parsed.llmError || ''; break; } } }\nchatLog = chatLog.slice(-20);\nvar sessionMemory = (parsed.sessionMemory && typeof parsed.sessionMemory === 'object') ? parsed.sessionMemory : (input.sessionMemory || {});\nvar customerProfile = parsed.customerProfile || input.customerProfile || sessionMemory.customerProfile || {};\nvar businessContext = parsed.businessContext || input.businessContext || sessionMemory.businessContext || {};\nvar successCriteria = Array.isArray(parsed.successCriteria) ? parsed.successCriteria : (Array.isArray(input.successCriteria) ? input.successCriteria : (Array.isArray(sessionMemory.successCriteria) ? sessionMemory.successCriteria : []));\nsessionMemory.tenantId = tenantId; sessionMemory.channel = channel; sessionMemory.userId = userId; sessionMemory.sessionId = sessionId; sessionMemory.isolationKey = isolationKey; sessionMemory.lastIntent = intent; sessionMemory.needHuman = needHuman; sessionMemory.customerProfile = customerProfile; sessionMemory.businessContext = businessContext; sessionMemory.successCriteria = successCriteria; sessionMemory.assignedAgent = assignedAgent; sessionMemory.agentStatus = agentStatus; sessionMemory.aiAutoContinue = aiAutoContinue; sessionMemory.updatedAt = new Date().toISOString(); sessionMemory.recentHistory = chatLog.slice(-10);\nvar result = {reply:reply,intent:intent,needHuman:needHuman,confidence:Number(parsed.confidence || 0.7),tenantId:tenantId,channel:channel,userId:userId,sessionId:sessionId,isolationKey:isolationKey,requestId:String(input.requestId || metadata.csRequestId || ''),contextCacheKey:String(input.contextCacheKey || metadata.csContextCacheKey || ('cs:session:' + isolationKey)),sessionMemory:sessionMemory,chatLog:chatLog,skillMatches:Array.isArray(parsed.skillMatches)?parsed.skillMatches:(input.skillMatches||[]),actions:Array.isArray(parsed.actions)?parsed.actions:(input.actions||[]),functionCalls:Array.isArray(parsed.functionCalls)?parsed.functionCalls:(input.functionCalls||[]),externalResults:parsed.externalResults || input.externalResults || {},customerProfile:customerProfile,businessContext:businessContext,successCriteria:successCriteria,source:parsed.source || 'ai/openai compatible generated',handoffSummary:String(parsed.handoffSummary || (needHuman ? ('用户诉求：' + (input.text || '') + '；意图：' + intent) : '')),assignedAgent:assignedAgent,agentStatus:agentStatus,aiAutoContinue:aiAutoContinue,reasoning:String(parsed.reasoning || ''),usage:parsed.usage || {},aiError:String(parsed.aiError || parsed.llmError || ''),llmError:String(parsed.llmError || parsed.aiError || '')};\nresult.contextSnapshotJson = JSON.stringify({tenantId:tenantId,channel:channel,userId:userId,sessionId:sessionId,isolationKey:isolationKey,slots:sessionMemory.slots||{},sessionMemory:sessionMemory,customerProfile:customerProfile,businessContext:businessContext,successCriteria:successCriteria,lastIntent:intent,needHuman:needHuman,assignedAgent:assignedAgent,agentStatus:agentStatus,aiAutoContinue:aiAutoContinue,recentHistory:chatLog.slice(-10),chatLog:chatLog.slice(-20),aiError:result.aiError,llmError:result.llmError,updatedAt:sessionMemory.updatedAt});\nresult.handoffRecordJson = JSON.stringify({tenantId:tenantId,channel:channel,userId:userId,sessionId:sessionId,isolationKey:isolationKey,requestId:result.requestId,intent:intent,reply:reply,handoffSummary:result.handoffSummary,chatLog:chatLog.slice(-10),createdAt:sessionMemory.updatedAt,status:needHuman?'waiting_human':'none',agentStatus:agentStatus,aiAutoContinue:aiAutoContinue});\nmsg = result;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n14_cache_set",
+        "additionalInfo": {
+          "layoutX": 3180,
+          "layoutY": 280
+        },
+        "type": "cacheSet",
+        "name": "写回会话上下文缓存",
+        "debugMode": true,
+        "configuration": {
+          "items": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain",
+              "ttl": "24h",
+              "value": "${msg.contextSnapshotJson}"
+            }
+          ]
+        }
+      },
+      {
+        "id": "n15_need_handoff",
+        "additionalInfo": {
+          "layoutX": 3420,
+          "layoutY": 280
+        },
+        "type": "jsFilter",
+        "name": "是否需要人工记录",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "return msg.needHuman === true;"
+        }
+      },
+      {
+        "id": "n16_handoff_cache",
+        "additionalInfo": {
+          "layoutX": 3660,
+          "layoutY": 180
+        },
+        "type": "cacheSet",
+        "name": "写入人工关注记录",
+        "debugMode": true,
+        "configuration": {
+          "items": [
+            {
+              "key": "cs:handoff:${msg.isolationKey}:${msg.requestId}",
+              "level": "chain",
+              "ttl": "168h",
+              "value": "${msg.handoffRecordJson}"
+            }
+          ]
+        }
+      },
+      {
+        "id": "n17_end",
+        "additionalInfo": {
+          "layoutX": 3900,
+          "layoutY": 280
+        },
+        "type": "end",
+        "name": "返回客服响应",
+        "debugMode": true,
+        "configuration": {}
+      },
+      {
+        "id": "n3b_local_intent",
+        "additionalInfo": {
+          "layoutX": 980,
+          "layoutY": 280
+        },
+        "type": "jsTransform",
+        "name": "本地意图预判与槽位提取",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction asText(value) { return String(value == null ? '' : value).trim(); }\nfunction has(pattern, text) { return pattern.test(text); }\nfunction collectText() {\n  var parts = [asText(msg.text), asText(msg.content)];\n  var history = Array.isArray(msg.history) ? msg.history : [];\n  for (var i = Math.max(0, history.length - 4); i < history.length; i++) {\n    if (history[i] && history[i].content) parts.push(asText(history[i].content));\n  }\n  return parts.join(' ');\n}\nif (!msg.sessionMemory) msg.sessionMemory = {};\nif (!msg.sessionMemory.slots) msg.sessionMemory.slots = {};\nvar text = asText(msg.text || msg.content);\nvar allText = collectText();\nvar orderMatch = allText.match(/[A-Z]{1,8}[0-9]{5,}/);\nif (orderMatch) msg.sessionMemory.slots.orderNo = orderMatch[0];\nvar previousIntent = asText(msg.sessionMemory.lastIntent);\nvar hasOrderContext = !!msg.sessionMemory.slots.orderNo || previousIntent === 'order_query';\nvar intent = 'unknown';\nvar confidence = 0.3;\nvar reasons = [];\nif (has(/(转人工|人工客服|真人|投诉|升级处理|强烈不满|非常不满|没人处理|主管|经理|立刻|马上)/, text)) {\n  intent = 'human_handoff'; confidence = 0.96; reasons.push('human_escalation_keyword');\n} else if (has(/(退款|退货|换货|售后|质量问题|赔付|申诉|补偿|坏了|破损|少发|漏发)/, allText)) {\n  intent = 'refund_after_sales'; confidence = 0.92; reasons.push('after_sales_keyword');\n} else if (has(/(订单|物流|快递|发货|配送|签收|运单|包裹|到哪|到货|催发|进展)/, allText) || (hasOrderContext && has(/(刚才|那个|这个|它|进展|到了|怎么还|多久|查一下|继续|物流|发货)/, text))) {\n  intent = 'order_query'; confidence = 0.9; reasons.push(hasOrderContext ? 'order_context_follow_up' : 'order_keyword');\n} else if (has(/(错误码|报错|不能用|无法使用|打不开|安装|配置|连接失败|登录失败|闪退|卡住|故障|调试|接口不通)/, allText)) {\n  intent = 'technical_support'; confidence = 0.88; reasons.push('technical_keyword');\n} else if (has(/(服务时间|营业时间|费用|收费|价格|规则|政策|保修|发票|常见问题|FAQ|怎么收费|支持哪些)/i, allText)) {\n  intent = 'faq'; confidence = 0.84; reasons.push('faq_keyword');\n} else if (text.length > 0 && text.length <= 8 && has(/^(你好|您好|在吗|hello|hi)$/i, text)) {\n  intent = 'other'; confidence = 0.78; reasons.push('greeting');\n}\nmsg.intentCandidate = intent;\nmsg.intentConfidence = confidence;\nmsg.localIntentReasons = reasons;\nmsg.sessionMemory.intentCandidate = intent;\nmsg.sessionMemory.intentConfidence = confidence;\nmsg.sessionMemory.updatedAt = new Date().toISOString();\nmsg.intentInput = JSON.stringify({ text: msg.text, history: msg.history, sessionMemory: msg.sessionMemory, localIntent: { intent: intent, confidence: confidence, reasons: reasons }, skillHints: msg.skillHints });\nmetadata.intentCandidate = intent;\nmetadata.intentConfidence = String(confidence);\nmetadata.localIntentReasons = JSON.stringify(reasons);\nmetadata.csContext = JSON.stringify(msg);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n3c_intent_route",
+        "additionalInfo": {
+          "layoutX": 1180,
+          "layoutY": 280
+        },
+        "type": "jsSwitch",
+        "name": "确定性意图路由",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "var intent = String((msg && msg.intentCandidate) || 'unknown');\nif (intent && intent !== 'unknown') return [intent];\nreturn ['ai_intent'];"
+        }
+      },
+      {
+        "id": "n11_build_ai_request",
+        "additionalInfo": {
+          "layoutX": 2220,
+          "layoutY": 280
+        },
+        "type": "jsTransform",
+        "name": "构造AI客服请求",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction pick() { for (var i = 0; i < arguments.length; i++) { var v = arguments[i]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; }\nfunction stripSlash(v) { return String(v || '').replace(/\\/+$/, ''); }\nvar profile = (msg.customerProfile && typeof msg.customerProfile === 'object') ? msg.customerProfile : {};\nvar assignedAgent = msg.assignedAgent || (msg.sessionMemory && msg.sessionMemory.assignedAgent) || null;\nvar endpoints = (msg.integrationEndpoints && typeof msg.integrationEndpoints === 'object') ? msg.integrationEndpoints : {};\nvar globalUrl = '';\nvar globalKey = '';\nvar globalModel = '';\ntry { if (typeof global !== 'undefined' && global) { globalUrl = global.llm_url || global.ai_url || ''; globalKey = global.llm_api_key || global.llm_key || global.ai_key || ''; globalModel = global.llm_model || global.ai_model || ''; } } catch(e) {}\nvar llmUrl = pick(msg.llmUrl, profile.llmUrl, endpoints.llmUrl, globalUrl, '<CONFIGURE_LLM_BASE_URL>');\nvar chatUrl = /\\/chat\\/completions$/.test(llmUrl) ? llmUrl : (stripSlash(llmUrl) + '/chat/completions');\nvar llmKey = pick(msg.llmKey, profile.llmKey, endpoints.llmKey, globalKey, '<CONFIGURE_LLM_API_KEY>');\nvar llmModel = pick(msg.llmModel, profile.llmModel, endpoints.llmModel, globalModel, '<CONFIGURE_LLM_MODEL>');\nvar systemPrompt = [\n  '你是一个可上线使用的 AI 客服代理人，负责根据当前输入 JSON 生成客服回复。',\n  '你必须只输出合法 JSON 对象，不要 Markdown，不要代码块。',\n  '字段必须包含：reply(string)、intent(string)、needHuman(boolean)、confidence(number)、tenantId(string)、channel(string)、userId(string)、sessionId(string)、isolationKey(string)、sessionMemory(object)、chatLog(array)、skillMatches(array)、actions(array)、functionCalls(array)、source(string)、handoffSummary(string)、agentStatus(string)、aiAutoContinue(boolean)。',\n  '必须保持用户隔离：只能使用输入 JSON 中 isolationKey 对应的 history、sessionMemory、chatLog。',\n  '回复必须结合 text、intent、skillMatches、knowledgeContext、actions、functionCalls、externalResults 和 history。',\n  '如果没有真实订单、退款、物流或工单接口结果，不能编造状态，只能说明正在查询、需要字段、已记录或已提示人工关注。',\n  'needHuman 为 true 时，agentStatus 固定为 waiting_human；可以只给简短安抚和等待人工关注提示，不能伪装成人工已经接手；handoffSummary 给人工客服可读摘要。',\n  'chatLog 在输入 chatLog 后追加本次 assistant 回复。',\n  'sessionMemory 保留 slots、lastIntent、needHuman、assignedAgent、agentStatus、aiAutoContinue、updatedAt、isolationKey；AI 默认自动处理，人工协作可继续 AI，人工接管由前置服务模式节点阻断。',\n  'source 固定为 ai/openai compatible generated。',\n  '语言自然、专业、简洁，直接像客服回复客户。'\n].join('\\n');\nif (assignedAgent) {\n  function skillRefLabel(value) { if (typeof value === 'string') return String(value).trim(); if (!value || typeof value !== 'object') return ''; var id = String(value.id || value.skillId || value.name || '').trim(); if (!id) return ''; var scope = String(value.scope || 'global').toLowerCase() === 'local' ? 'local' : 'global'; return scope + ':' + id; }\n  var agentSkills = Array.isArray(assignedAgent.skills) ? assignedAgent.skills.map(skillRefLabel).filter(Boolean) : [];\n  var agentSpecialties = Array.isArray(assignedAgent.specialties) ? assignedAgent.specialties : [];\n  systemPrompt += '\\n当前会话已安排人工坐席：' + String(assignedAgent.name || assignedAgent.displayName || '人工客服') + '。';\n  if (assignedAgent.responsibilities) systemPrompt += '\\n坐席负责范围：' + String(assignedAgent.responsibilities);\n  if (agentSpecialties.length) systemPrompt += '\\n坐席擅长领域：' + agentSpecialties.join('、');\n  if (agentSkills.length) systemPrompt += '\\n当前会话已选择的坐席 Skill 引用（仅表示可用配置，不代表本次已执行）：' + agentSkills.join('、');\n  if (assignedAgent.persona) systemPrompt += '\\n坐席服务个性与处理提示：' + String(assignedAgent.persona);\n  systemPrompt += '\\n你是该坐席的 AI 协作能力，不得冒充人工已亲自回复；只有 human_assist 来源的消息才标记为人工回复。';\n}\nvar aiInput = msg.aiInput || JSON.stringify(msg);\nmetadata.csBusinessContext = JSON.stringify(msg);\nmetadata.csRequestText = String(msg.text || msg.content || '');\nmetadata.csAiInput = aiInput;\nmetadata.csLlmChatUrl = chatUrl;\nmetadata.csLlmApiKey = llmKey;\nmetadata.csLlmModel = llmModel;\nmetadata.csLlmProvider = 'openai-compatible-http';\nmetadata.csAssignedAgent = assignedAgent ? JSON.stringify(assignedAgent) : '';\nmsg = { model: llmModel, messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: aiInput } ], response_format: { type: 'json_object' } };\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n11_call_ai",
+        "additionalInfo": {
+          "layoutX": 2460,
+          "layoutY": 280
+        },
+        "type": "restApiCall",
+        "name": "调用OpenAI兼容模型",
+        "debugMode": true,
+        "configuration": {
+          "headers": {
+            "Authorization": "Bearer ${metadata.csLlmApiKey}",
+            "Content-Type": "application/json"
+          },
+          "insecureSkipVerify": true,
+          "readTimeoutMs": 60000,
+          "requestMethod": "POST",
+          "restEndpointUrlPattern": "${metadata.csLlmChatUrl}"
+        }
+      },
+      {
+        "id": "n11_extract_ai_reply",
+        "additionalInfo": {
+          "layoutX": 2700,
+          "layoutY": 280
+        },
+        "type": "jsTransform",
+        "name": "解析AI客服回复",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nfunction cleanFence(s) { s = String(s || '').trim(); var fence = String.fromCharCode(96,96,96); if (s.indexOf(fence + 'json') === 0) s = s.substring(7).trim(); else if (s.indexOf(fence) === 0) s = s.substring(3).trim(); if (s.lastIndexOf(fence) === s.length - 3) s = s.substring(0, s.length - 3).trim(); return s; }\nfunction parseMaybe(value) {\n  if (value && typeof value === 'object' && !Array.isArray(value)) return value;\n  if (typeof value === 'string') {\n    var s = cleanFence(value);\n    try { return JSON.parse(s); } catch(e) { return { reply: s }; }\n  }\n  return {};\n}\nfunction parseBusiness() { try { return JSON.parse(metadata.csBusinessContext || metadata.csAiInput || '{}'); } catch(e) { return {}; } }\nfunction normalizeLogItem(item, input) {\n  if (!item || typeof item !== 'object') return null;\n  var content = String(item.content == null ? '' : item.content);\n  if (!content) return null;\n  return {\n    role: String(item.role || 'user'),\n    content: content,\n    tenantId: String(item.tenantId || input.tenantId || metadata.tenantId || 'default'),\n    channel: String(item.channel || input.channel || metadata.channel || 'web'),\n    userId: String(item.userId || input.userId || metadata.userId || 'anonymous'),\n    sessionId: String(item.sessionId || input.sessionId || metadata.sessionId || input.userId || ''),\n    isolationKey: String(item.isolationKey || input.isolationKey || metadata.csIsolationKey || ''),\n    ts: item.ts || item.time || new Date().toISOString(),\n    id: item.id || item.messageId || '',\n    clientMessageId: item.clientMessageId || '',\n    author: item.author || item.operator || '',\n    operator: item.operator || item.author || '',\n    source: item.source || '',\n    action: item.action || item.actionType || ''\n  };\n}\nfunction mergeLog(target, source, input) {\n  var list = Array.isArray(source) ? source : [];\n  for (var i = 0; i < list.length; i++) {\n    var item = normalizeLogItem(list[i], input);\n    if (!item) continue;\n    var duplicate = false;\n    for (var j = 0; j < target.length; j++) {\n      if (target[j].role === item.role && target[j].content === item.content) { duplicate = true; break; }\n    }\n    if (!duplicate) target.push(item);\n  }\n}\nvar api = parseMaybe(msg);\nvar input = parseBusiness();\nvar content = '';\nvar reasoning = '';\nif (api && api.choices && api.choices.length && api.choices[0].message) {\n  content = String(api.choices[0].message.content || '');\n  reasoning = String(api.choices[0].message.reasoning_content || api.choices[0].message.reasoning || '');\n} else if (api && api.reply) {\n  content = String(api.reply || '');\n}\nvar parsed = parseMaybe(content);\nif (!parsed.reply && content) parsed.reply = content;\nvar mergedChatLog = [];\nmergeLog(mergedChatLog, input.chatLog, input);\nmergeLog(mergedChatLog, parsed.chatLog, input);\nvar requestText = String(input.text || metadata.csRequestText || '');\nvar hasUserRequest = false;\nfor (var u = 0; u < mergedChatLog.length; u++) {\n  if (mergedChatLog[u].role === 'user' && (!requestText || mergedChatLog[u].content === requestText)) { hasUserRequest = true; break; }\n}\nif (requestText && !hasUserRequest) {\n  mergedChatLog.unshift({role:'user',content:requestText,tenantId:String(input.tenantId || metadata.tenantId || 'default'),channel:String(input.channel || metadata.channel || 'web'),userId:String(input.userId || metadata.userId || 'anonymous'),sessionId:String(input.sessionId || metadata.sessionId || input.userId || ''),isolationKey:String(input.isolationKey || metadata.csIsolationKey || ''),ts:input.receivedAt || new Date().toISOString()});\n}\nparsed.requestText = requestText;\nparsed.chatLog = mergedChatLog.slice(-20);\nparsed.intent = parsed.intent || input.intent || metadata.intent || 'other';\nparsed.needHuman = parsed.needHuman === true || input.needHuman === true || String(metadata.needHuman) === 'true';\nparsed.assignedAgent = parsed.assignedAgent || input.assignedAgent || (input.sessionMemory && input.sessionMemory.assignedAgent) || null;\nparsed.agentStatus = String(parsed.agentStatus || (parsed.assignedAgent ? 'human_active' : (parsed.needHuman ? 'waiting_human' : 'ai_auto')));\nparsed.aiAutoContinue = parsed.aiAutoContinue !== false && !(input.sessionMemory && input.sessionMemory.aiAutoContinue === false);\nparsed.tenantId = parsed.tenantId || input.tenantId || metadata.tenantId || 'default';\nparsed.channel = parsed.channel || input.channel || metadata.channel || 'web';\nparsed.userId = parsed.userId || input.userId || metadata.userId || 'anonymous';\nparsed.sessionId = parsed.sessionId || input.sessionId || metadata.sessionId || parsed.userId;\nparsed.isolationKey = parsed.isolationKey || input.isolationKey || metadata.csIsolationKey || '';\nparsed.sessionMemory = (parsed.sessionMemory && typeof parsed.sessionMemory === 'object') ? parsed.sessionMemory : (input.sessionMemory || {});\nparsed.skillMatches = Array.isArray(parsed.skillMatches) ? parsed.skillMatches : (input.skillMatches || []);\nparsed.actions = Array.isArray(parsed.actions) ? parsed.actions : (input.actions || []);\nparsed.functionCalls = Array.isArray(parsed.functionCalls) ? parsed.functionCalls : (input.functionCalls || []);\nparsed.externalResults = parsed.externalResults || input.externalResults || {};\nparsed.source = parsed.source || 'ai/openai compatible generated';\nparsed.sessionMemory.assignedAgent = parsed.assignedAgent;\nparsed.sessionMemory.agentStatus = parsed.agentStatus;\nparsed.sessionMemory.aiAutoContinue = parsed.aiAutoContinue;\nparsed.model = metadata.csLlmModel || '';\nparsed.reasoning = reasoning;\nparsed.usage = api.usage || {};\nmsg = parsed;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n20_list_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 560
+        },
+        "type": "jsTransform",
+        "name": "准备客户列表查询",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nvar tenantId = clean(msg.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || metadata.channel, 'web');\nvar includeAll = msg.includeAll === true || String(msg.includeAll || '').toLowerCase() === 'true';\nvar page = Math.max(1, parseInt(msg.page || '1', 10) || 1);\nvar size = Math.min(100, Math.max(1, parseInt(msg.size || '20', 10) || 20));\nvar prefix = includeAll ? 'cs:session:' : ('cs:session:' + keyPart(tenantId) + ':' + keyPart(channel) + ':');\nmsg.operation = 'CUSTOMER_LIST';\nmsg.tenantId = tenantId;\nmsg.channel = channel;\nmsg.page = page;\nmsg.size = size;\nmsg.sessionPrefix = prefix;\nmsg.sessionWildcardKey = prefix + '*';\nmsg.indexCacheKey = 'cs:index:' + keyPart(tenantId) + ':' + keyPart(channel);\nmetadata.csOperation = 'CUSTOMER_LIST';\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n21_list_cache_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 560
+        },
+        "type": "cacheGet",
+        "name": "读取客户索引与会话缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.indexCacheKey}",
+              "level": "chain"
+            },
+            {
+              "key": "${msg.sessionWildcardKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n22_list_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 560
+        },
+        "type": "jsTransform",
+        "name": "包装客户列表",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nfunction pickLastMessage(chatLog, role) { if (!Array.isArray(chatLog)) return ''; for (var i = chatLog.length - 1; i >= 0; i--) { var item = chatLog[i]; if (!item || typeof item !== 'object') continue; if (!role || item.role === role) return String(item.content || ''); } return ''; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nfunction sessionKey(item) {\n  if (item && item.key) return String(item.key);\n  if (item && item.isolationKey) return 'cs:session:' + String(item.isolationKey);\n  if (!item) return '';\n  return 'cs:session:' + [item.tenantId || msg.tenantId || 'default', item.channel || msg.channel || 'web', item.userId || 'anonymous', item.sessionId || item.userId || 'anonymous'].map(keyPart).join(':');\n}\nfunction summarize(key, value) {\n  var cached = parseMaybe(value);\n  if (!cached) return null;\n  var parts = String(cached.isolationKey || key.replace(/^cs:session:/, '')).split(':');\n  var chatLog = Array.isArray(cached.chatLog) ? cached.chatLog : (Array.isArray(cached.recentHistory) ? cached.recentHistory : []);\n  var memory = cached.sessionMemory && typeof cached.sessionMemory === 'object' ? cached.sessionMemory : cached;\n  return {\n    key: key,\n    tenantId: String(cached.tenantId || memory.tenantId || parts[0] || ''),\n    channel: String(cached.channel || memory.channel || parts[1] || ''),\n    userId: String(cached.userId || memory.userId || parts[2] || ''),\n    sessionId: String(cached.sessionId || memory.sessionId || parts[3] || ''),\n    isolationKey: String(cached.isolationKey || memory.isolationKey || parts.join(':')),\n    lastIntent: String(cached.lastIntent || memory.lastIntent || cached.intent || ''),\n    needHuman: cached.needHuman === true || memory.needHuman === true,\n    displayName: String(cached.displayName || (cached.customerProfile && (cached.customerProfile.displayName || cached.customerProfile.name)) || ''),\n    customerProfile: cached.customerProfile || memory.customerProfile || {},\n    businessContext: cached.businessContext || memory.businessContext || {},\n    successCriteria: cached.successCriteria || memory.successCriteria || [],\n    assignedAgent: cached.assignedAgent || memory.assignedAgent || null,\n    agentStatus: String(cached.agentStatus || memory.agentStatus || 'ai_auto'),\n    aiAutoContinue: !(cached.aiAutoContinue === false || memory.aiAutoContinue === false),\n    handoffSummary: String(cached.handoffSummary || memory.handoffSummary || ''),\n    updatedAt: String(cached.updatedAt || memory.updatedAt || ''),\n    lastMessage: pickLastMessage(chatLog, 'user'),\n    lastReply: pickLastMessage(chatLog, 'assistant'),\n    messageCount: chatLog.length,\n    source: 'session-cache'\n  };\n}\nfunction timeValue(value) { var time = value ? new Date(value).getTime() : 0; return isNaN(time) ? 0 : time; }\nfunction upsert(map, item, source) {\n  if (!item || typeof item !== 'object') return;\n  var key = sessionKey(item);\n  if (!key) return;\n  var normalized = {};\n  for (var prop in item) if (Object.prototype.hasOwnProperty.call(item, prop)) normalized[prop] = item[prop];\n  normalized.key = key;\n  normalized.source = source || normalized.source || 'backend';\n  var previous = map[key];\n  if (!previous) { map[key] = normalized; return; }\n  var nextTime = timeValue(normalized.updatedAt || normalized.lastTime || normalized.time);\n  var previousTime = timeValue(previous.updatedAt || previous.lastTime || previous.time);\n  map[key] = nextTime >= previousTime ? Object.assign({}, previous, normalized) : Object.assign({}, normalized, previous);\n}\nvar merged = {};\nvar indexSnapshot = parseMaybe(msg[msg.indexCacheKey]);\nvar indexCount = 0;\nvar scannedCount = 0;\nif (indexSnapshot && Array.isArray(indexSnapshot.sessions)) {\n  for (var i = 0; i < indexSnapshot.sessions.length; i++) {\n    upsert(merged, indexSnapshot.sessions[i], 'scheduled-index');\n    indexCount += 1;\n  }\n}\nfor (var key in msg) {\n  if (!Object.prototype.hasOwnProperty.call(msg, key)) continue;\n  if (String(key).indexOf('cs:session:') !== 0) continue;\n  var item = summarize(key, msg[key]);\n  if (item) {\n    upsert(merged, item, 'session-cache');\n    scannedCount += 1;\n  }\n}\nvar sessions = [];\nfor (var mergedKey in merged) if (Object.prototype.hasOwnProperty.call(merged, mergedKey)) sessions.push(merged[mergedKey]);\nsessions.sort(function(a, b) { return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); });\nvar total = sessions.length;\nvar page = Math.max(1, parseInt(msg.page || '1', 10) || 1);\nvar size = Math.min(100, Math.max(1, parseInt(msg.size || '20', 10) || 20));\nvar start = (page - 1) * size;\nmsg = {\n  operation: 'CUSTOMER_LIST',\n  tenantId: msg.tenantId || 'default',\n  channel: msg.channel || 'web',\n  page: page,\n  size: size,\n  total: total,\n  sessions: sessions.slice(start, start + size),\n  indexCacheKey: msg.indexCacheKey,\n  indexCount: indexCount,\n  scannedCount: scannedCount,\n  generatedAt: new Date().toISOString(),\n  source: indexSnapshot ? (scannedCount ? 'scheduled-index-plus-session-cache' : 'scheduled-index-cache') : 'session-cache-scan'\n};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n23_history_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 720
+        },
+        "type": "jsTransform",
+        "name": "准备历史对话查询",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nvar tenantId = clean(msg.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || metadata.channel, 'web');\nvar userId = clean(msg.userId || msg.customerId || metadata.userId, 'anonymous');\nvar sessionId = clean(msg.sessionId || msg.conversationId || metadata.sessionId, userId);\nvar isolationKey = clean(msg.isolationKey || '', [tenantId, channel, userId, sessionId].map(keyPart).join(':'));\nmsg.operation = 'CONVERSATION_HISTORY';\nmsg.tenantId = tenantId;\nmsg.channel = channel;\nmsg.userId = userId;\nmsg.sessionId = sessionId;\nmsg.isolationKey = isolationKey;\nmsg.contextCacheKey = 'cs:session:' + isolationKey;\nmetadata.csOperation = 'CONVERSATION_HISTORY';\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n24_history_cache_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 720
+        },
+        "type": "cacheGet",
+        "name": "读取历史对话缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n25_history_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 720
+        },
+        "type": "jsTransform",
+        "name": "包装历史对话",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nfunction timeValue(item) { var raw = item && (item.ts || item.time || item.createdAt || item.updatedAt); var time = raw ? new Date(raw).getTime() : 0; return isNaN(time) ? 0 : time; }\nvar cached = parseMaybe(msg[msg.contextCacheKey]);\nvar fullLog = cached && Array.isArray(cached.chatLog) ? cached.chatLog : (cached && Array.isArray(cached.recentHistory) ? cached.recentHistory : []);\nvar beforeTs = String(msg.beforeTs || msg.before || '').trim();\nvar beforeTime = beforeTs ? new Date(beforeTs).getTime() : 0;\nvar limit = Math.min(200, Math.max(1, parseInt(msg.limit || '200', 10) || 200));\nvar filtered = fullLog.slice();\nif (beforeTime && !isNaN(beforeTime)) {\n  filtered = filtered.filter(function(item) { var time = timeValue(item); return !time || time < beforeTime; });\n}\nfiltered.sort(function(a, b) { return timeValue(a) - timeValue(b); });\nvar total = fullLog.length;\nvar start = Math.max(0, filtered.length - limit);\nvar chatLog = filtered.slice(start);\nmsg = {\n  operation: 'CONVERSATION_HISTORY',\n  found: !!cached,\n  tenantId: msg.tenantId,\n  channel: msg.channel,\n  userId: msg.userId,\n  sessionId: msg.sessionId,\n  isolationKey: msg.isolationKey,\n  contextCacheKey: msg.contextCacheKey,\n  sessionMemory: cached || {},\n  chatLog: chatLog,\n  total: total,\n  limit: limit,\n  beforeTs: beforeTs,\n  hasMore: start > 0,\n  generatedAt: new Date().toISOString()\n};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n26_schedule_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 880
+        },
+        "type": "jsTransform",
+        "name": "准备排程维护",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nvar tenantId = clean(msg.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || metadata.channel, 'web');\nvar prefix = 'cs:session:' + keyPart(tenantId) + ':' + keyPart(channel) + ':';\nmsg.operation = 'SCHEDULE_MAINTAIN';\nmsg.tenantId = tenantId;\nmsg.channel = channel;\nmsg.sessionPrefix = prefix;\nmsg.sessionWildcardKey = prefix + '*';\nmsg.indexCacheKey = 'cs:index:' + keyPart(tenantId) + ':' + keyPart(channel);\nmetadata.csOperation = 'SCHEDULE_MAINTAIN';\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n27_schedule_cache_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 880
+        },
+        "type": "cacheGet",
+        "name": "扫描会话缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.sessionWildcardKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n28_schedule_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 880
+        },
+        "type": "jsTransform",
+        "name": "生成排程客户索引",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nfunction pickLastMessage(chatLog, role) { if (!Array.isArray(chatLog)) return ''; for (var i = chatLog.length - 1; i >= 0; i--) { var item = chatLog[i]; if (!item || typeof item !== 'object') continue; if (!role || item.role === role) return String(item.content || ''); } return ''; }\nvar sessions = [];\nfor (var key in msg) {\n  if (!Object.prototype.hasOwnProperty.call(msg, key)) continue;\n  if (String(key).indexOf('cs:session:') !== 0) continue;\n  var cached = parseMaybe(msg[key]);\n  if (!cached) continue;\n  var memory = cached.sessionMemory && typeof cached.sessionMemory === 'object' ? cached.sessionMemory : cached;\n  var chatLog = Array.isArray(cached.chatLog) ? cached.chatLog : (Array.isArray(cached.recentHistory) ? cached.recentHistory : []);\n  sessions.push({\n    key: key,\n    tenantId: String(cached.tenantId || memory.tenantId || msg.tenantId || ''),\n    channel: String(cached.channel || memory.channel || msg.channel || ''),\n    userId: String(cached.userId || memory.userId || ''),\n    sessionId: String(cached.sessionId || memory.sessionId || ''),\n    isolationKey: String(cached.isolationKey || memory.isolationKey || key.replace(/^cs:session:/, '')),\n    lastIntent: String(cached.lastIntent || memory.lastIntent || cached.intent || ''),\n    needHuman: cached.needHuman === true || memory.needHuman === true,\n    displayName: String(cached.displayName || (cached.customerProfile && (cached.customerProfile.displayName || cached.customerProfile.name)) || ''),\n    customerProfile: cached.customerProfile || memory.customerProfile || {},\n    businessContext: cached.businessContext || memory.businessContext || {},\n    successCriteria: cached.successCriteria || memory.successCriteria || [],\n    assignedAgent: cached.assignedAgent || memory.assignedAgent || null,\n    agentStatus: String(cached.agentStatus || memory.agentStatus || 'ai_auto'),\n    aiAutoContinue: !(cached.aiAutoContinue === false || memory.aiAutoContinue === false),\n    handoffSummary: String(cached.handoffSummary || memory.handoffSummary || ''),\n    updatedAt: String(cached.updatedAt || memory.updatedAt || ''),\n    lastMessage: pickLastMessage(chatLog, 'user'),\n    lastReply: pickLastMessage(chatLog, 'assistant'),\n    messageCount: chatLog.length\n  });\n}\nsessions.sort(function(a, b) { return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); });\nmsg.indexSnapshot = { tenantId: msg.tenantId, channel: msg.channel, sessions: sessions, total: sessions.length, generatedAt: new Date().toISOString(), source: 'endpoint/schedule' };\nmsg.indexSnapshotJson = JSON.stringify(msg.indexSnapshot);\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n29_schedule_cache_set",
+        "additionalInfo": {
+          "layoutX": 1000,
+          "layoutY": 880
+        },
+        "type": "cacheSet",
+        "name": "写入客户索引缓存",
+        "debugMode": true,
+        "configuration": {
+          "items": [
+            {
+              "key": "${msg.indexCacheKey}",
+              "level": "chain",
+              "ttl": "24h",
+              "value": "${msg.indexSnapshotJson}"
+            }
+          ]
+        }
+      },
+      {
+        "id": "n31_quick_inputs",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 1040
+        },
+        "type": "jsTransform",
+        "name": "快捷输入案例",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction sid(prefix) { return prefix + '_' + Date.now().toString(36); }\nvar tenantId = clean(msg.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || metadata.channel, 'web');\nfunction profile(userId, sessionId, segment, level, note) { return { tenantId: tenantId, channel: channel, userId: userId, sessionId: sessionId, segment: segment, level: level, note: note }; }\nmsg = {\n  operation: 'QUICK_INPUTS',\n  tenantId: tenantId,\n  channel: channel,\n  source: 'rule-chain-quick-inputs',\n  generatedAt: new Date().toISOString(),\n  quickInputs: [\n    { id:'smalltalk', title:'闲聊开场', description:'验证 AI 客服是否先说明能力边界，再引导客户提出具体业务问题。', text:'你好，我想了解一下你们现在能帮我处理哪些问题？', expected:{intent:'faq',needHuman:false,confidence:0.7}, customerProfile:profile('scenario_new_user', sid('smalltalk'), 'new_user', 'standard', '新客户首次咨询，适合能力介绍和问题引导。'), businessContext:{touchpoint:channel,stage:'pre_service',risk:'low'}, successCriteria:['说明可处理范围','不编造不存在的能力','引导客户补充具体诉求'], hints:['闲聊','能力介绍','引导提问'], tags:['闲聊','开场'] },\n    { id:'order_status', title:'订单物流', description:'验证订单号提取、物流延迟解释、缺少真实订单接口时的克制回复。', text:'帮我查一下订单 DEMO20260001 到哪里了，物流一直没更新。', expected:{intent:'order_query',needHuman:false,confidence:0.86}, customerProfile:profile('scenario_order_user', sid('order'), 'returning_user', 'gold', '复购客户，对物流时效敏感。'), businessContext:{orderNo:'DEMO20260001',slaHours:48,touchpoint:channel,risk:'medium'}, successCriteria:['提取订单号','说明无真实接口结果时不能编造物流状态','要求身份核验或补充手机号尾号'], hints:['订单查询','物流解释','安抚话术'], tags:['订单','物流'] },\n    { id:'refund_status', title:'退款售后', description:'验证售后退款处理、凭证收集和不承诺未核实退款结果。', text:'我申请退款两天了还没到账，订单号 DEMO20260019，麻烦帮我确认进度。', expected:{intent:'refund_after_sales',needHuman:false,confidence:0.84}, customerProfile:profile('scenario_refund_user', sid('refund'), 'after_sales', 'standard', '退款等待两天，关注到账时间。'), businessContext:{orderNo:'DEMO20260019',refundDays:2,touchpoint:channel,risk:'medium'}, successCriteria:['识别售后退款','收集订单号和凭证','不承诺退款已成功'], hints:['退款进度','售后查询','风险安抚'], tags:['售后','退款'] },\n    { id:'faq_service_time', title:'服务政策', description:'验证服务政策类 FAQ 是否直接回答，并标注需要核验的账号/订单类边界。', text:'你们的服务时间是什么时候？周末能处理问题吗？', expected:{intent:'faq',needHuman:false,confidence:0.8}, customerProfile:profile('scenario_policy_user', sid('faq'), 'policy_reader', 'standard', '咨询服务时间和周末处理范围。'), businessContext:{policyTopic:'service_time',touchpoint:channel,risk:'low'}, successCriteria:['识别 FAQ','给出通用政策回答','提示具体订单仍需核验'], hints:['常见问题','服务时间'], tags:['FAQ'] },\n    { id:'human_handoff', title:'人工关注', description:'验证投诉升级场景是否进入人工关注，并生成人工客服可接续摘要。', text:'我已经投诉三次了，你们一直没人处理，现在立刻给我转人工客服。', expected:{intent:'human_handoff',needHuman:true,confidence:0.9}, customerProfile:profile('scenario_complaint_user', sid('handoff'), 'complaint', 'vip', '多次投诉未解决，情绪强烈。'), businessContext:{complaintCount:3,touchpoint:channel,risk:'high'}, successCriteria:['识别强烈投诉','needHuman=true','生成 handoffSummary'], hints:['人工客服转接','投诉升级','情绪安抚'], tags:['转人工','投诉'] },\n    { id:'technical_error', title:'技术故障', description:'验证错误码、环境和复现步骤收集。', text:'客户端一直提示 E502，重新登录也不行，能帮我排查吗？', expected:{intent:'technical_support',needHuman:false,confidence:0.82}, customerProfile:profile('scenario_tech_user', sid('tech'), 'technical_user', 'standard', '技术故障咨询，可能需要收集环境和错误码。'), businessContext:{errorCode:'E502',touchpoint:channel,risk:'medium'}, successCriteria:['识别技术支持','要求产品环境和复现步骤','给出安全排查步骤'], hints:['技术支持','错误码','故障排查'], tags:['技术','错误码'] },\n    { id:'multi_order_followup', title:'多轮追问', description:'验证多轮订单追问是否保持同一 isolationKey，不丢上下文。', messages:['先帮我查订单 DEMO20260001。','如果今天还不到，我能不能改成明天上午配送？','刚才那个订单如果要转人工，需要我补充什么信息？'], expected:{intent:'order_query',needHuman:false,confidence:0.86}, customerProfile:profile('scenario_order_follow_user', sid('order_follow'), 'returning_user', 'gold', '订单追问会连续发生，需要保持上下文。'), businessContext:{orderNo:'DEMO20260001',touchpoint:channel,risk:'medium'}, successCriteria:['连续三条使用同一会话','保持订单号上下文','追问时不串到其他客户'], hints:['订单查询','物流解释','改约配送','上下文追问'], tags:['多条','上下文'] },\n    { id:'multi_correction', title:'客户改口', description:'验证客户改口后，规则链是否覆盖旧订单号并继续使用新订单号。', messages:['我要查 DEMO20260001。','不对，订单号我看错了，应该是 DEMO20260002。','请基于新的订单号继续处理，不要用前一个。'], expected:{intent:'order_query',needHuman:false,confidence:0.82}, customerProfile:profile('scenario_correction_user', sid('correction'), 'returning_user', 'standard', '客户会修正关键信息，需要覆盖旧槽位。'), businessContext:{oldOrderNo:'DEMO20260001',correctedOrderNo:'DEMO20260002',touchpoint:channel,risk:'medium'}, successCriteria:['识别改口','覆盖旧订单号','后续回复基于新订单号'], hints:['订单查询','上下文修正','防串单'], tags:['多条','改口'] },\n    { id:'multi_handoff', title:'升级投诉', description:'验证连续升级投诉后，AI 是否提示人工关注并保持上下文。', messages:['这个问题已经拖了很久，我想升级处理。','我现在情绪比较激动，希望有人马上关注。','如果你不能处理，请直接生成转人工摘要。'], expected:{intent:'human_handoff',needHuman:true,confidence:0.9}, customerProfile:profile('scenario_escalation_user', sid('escalation'), 'complaint', 'vip', '升级投诉客户，需要优先安抚并提示人工关注。'), businessContext:{escalation:true,touchpoint:channel,risk:'high'}, successCriteria:['识别升级投诉','needHuman=true','输出人工接续摘要'], hints:['投诉升级','人工客服转接','情绪安抚'], tags:['多条','转人工'] }\n  ]\n};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n32_report_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 1200
+        },
+        "type": "jsTransform",
+        "name": "准备响应统计报表",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nfunction parsePayload(value) { if (value == null) return {}; if (typeof value === 'object') return value; if (typeof value === 'string') { try { var parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {}; } catch(e) { return {}; } } return {}; }\nmsg = parsePayload(msg);\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nvar tenantId = clean(msg.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || metadata.channel, 'web');\nvar includeAll = msg.includeAll === true || String(msg.includeAll || '').toLowerCase() === 'true';\nvar prefix = includeAll ? 'cs:session:' : ('cs:session:' + keyPart(tenantId) + ':' + keyPart(channel) + ':');\nmsg.operation = 'RESPONSE_REPORT';\nmsg.tenantId = tenantId;\nmsg.channel = channel;\nmsg.includeAll = includeAll;\nmsg.sessionPrefix = prefix;\nmsg.sessionWildcardKey = prefix + '*';\nmsg.indexCacheKey = 'cs:index:' + keyPart(tenantId) + ':' + keyPart(channel);\nmetadata.csOperation = 'RESPONSE_REPORT';\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n33_report_cache_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 1200
+        },
+        "type": "cacheGet",
+        "name": "读取报表统计缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.indexCacheKey}",
+              "level": "chain"
+            },
+            {
+              "key": "${msg.sessionWildcardKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n34_report_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 1200
+        },
+        "type": "jsTransform",
+        "name": "生成响应统计报表",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nfunction pickLastMessage(chatLog, role) { if (!Array.isArray(chatLog)) return ''; for (var i = chatLog.length - 1; i >= 0; i--) { var item = chatLog[i]; if (!item || typeof item !== 'object') continue; if (!role || item.role === role) return String(item.content || ''); } return ''; }\nfunction inc(map, key) { var name = String(key || 'unknown').trim() || 'unknown'; map[name] = (map[name] || 0) + 1; }\nfunction rate(count, total) { return total ? Math.round((count * 10000) / total) / 100 : 0; }\nfunction timeValue(value) { var t = value ? new Date(value).getTime() : 0; return isNaN(t) ? 0 : t; }\nfunction summarize(key, value) {\n  var cached = parseMaybe(value);\n  if (!cached) return null;\n  var parts = String(cached.isolationKey || key.replace(/^cs:session:/, '')).split(':');\n  var chatLog = Array.isArray(cached.chatLog) ? cached.chatLog : (Array.isArray(cached.recentHistory) ? cached.recentHistory : []);\n  var memory = cached.sessionMemory && typeof cached.sessionMemory === 'object' ? cached.sessionMemory : cached;\n  var userMessages = 0;\n  var assistantMessages = 0;\n  for (var i = 0; i < chatLog.length; i++) {\n    var role = String(chatLog[i] && chatLog[i].role || '').toLowerCase();\n    if (role === 'user') userMessages += 1;\n    if (role === 'assistant') assistantMessages += 1;\n  }\n  return {\n    key: key,\n    tenantId: String(cached.tenantId || memory.tenantId || parts[0] || ''),\n    channel: String(cached.channel || memory.channel || parts[1] || ''),\n    userId: String(cached.userId || memory.userId || parts[2] || ''),\n    sessionId: String(cached.sessionId || memory.sessionId || parts[3] || ''),\n    isolationKey: String(cached.isolationKey || memory.isolationKey || parts.join(':')),\n    lastIntent: String(cached.lastIntent || memory.lastIntent || cached.intent || 'unknown'),\n    needHuman: cached.needHuman === true || memory.needHuman === true,\n    updatedAt: String(cached.updatedAt || memory.updatedAt || ''),\n    lastMessage: pickLastMessage(chatLog, 'user'),\n    lastReply: pickLastMessage(chatLog, 'assistant'),\n    messageCount: chatLog.length || Number(cached.messageCount || memory.messageCount || 0) || 0,\n    userMessages: userMessages,\n    assistantMessages: assistantMessages\n  };\n}\nvar sessions = [];\nfor (var key in msg) {\n  if (!Object.prototype.hasOwnProperty.call(msg, key)) continue;\n  if (String(key).indexOf('cs:session:') !== 0) continue;\n  var item = summarize(key, msg[key]);\n  if (item) sessions.push(item);\n}\nvar indexSnapshot = parseMaybe(msg[msg.indexCacheKey]);\nif (!sessions.length && indexSnapshot && Array.isArray(indexSnapshot.sessions)) {\n  sessions = indexSnapshot.sessions.map(function(item) {\n    return {\n      key: String(item.key || ''), tenantId: String(item.tenantId || msg.tenantId || ''), channel: String(item.channel || msg.channel || ''), userId: String(item.userId || ''), sessionId: String(item.sessionId || ''), isolationKey: String(item.isolationKey || ''), lastIntent: String(item.lastIntent || item.intent || 'unknown'), needHuman: item.needHuman === true, updatedAt: String(item.updatedAt || ''), lastMessage: String(item.lastMessage || ''), lastReply: String(item.lastReply || ''), messageCount: Number(item.messageCount || 0) || 0, userMessages: 0, assistantMessages: 0\n    };\n  });\n}\nsessions.sort(function(a, b) { return String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')); });\nvar totalSessions = sessions.length;\nvar totalMessages = 0;\nvar userMessages = 0;\nvar assistantMessages = 0;\nvar needHumanSessions = 0;\nvar active24h = 0;\nvar latestUpdatedAt = '';\nvar intentMap = {};\nvar channelMap = {};\nvar now = Date.now();\nfor (var i = 0; i < sessions.length; i++) {\n  var s = sessions[i];\n  totalMessages += Number(s.messageCount || 0) || 0;\n  userMessages += Number(s.userMessages || 0) || 0;\n  assistantMessages += Number(s.assistantMessages || 0) || 0;\n  if (s.needHuman === true) needHumanSessions += 1;\n  if (timeValue(s.updatedAt) && now - timeValue(s.updatedAt) <= 24 * 60 * 60 * 1000) active24h += 1;\n  if (!latestUpdatedAt || String(s.updatedAt || '').localeCompare(latestUpdatedAt) > 0) latestUpdatedAt = String(s.updatedAt || '');\n  inc(intentMap, s.lastIntent || s.intent || 'unknown');\n  inc(channelMap, s.channel || msg.channel || 'web');\n}\nfunction breakdown(map, total) { var list = []; for (var name in map) { if (!Object.prototype.hasOwnProperty.call(map, name)) continue; list.push({ name: name, count: map[name], rate: rate(map[name], total) }); } list.sort(function(a, b) { return b.count - a.count || String(a.name).localeCompare(String(b.name)); }); return list; }\nmsg = {\n  operation: 'RESPONSE_REPORT',\n  tenantId: msg.tenantId || 'default',\n  channel: msg.channel || 'web',\n  includeAll: msg.includeAll === true,\n  generatedAt: new Date().toISOString(),\n  source: sessions.length ? (indexSnapshot ? 'session-cache-with-index' : 'session-cache-scan') : 'empty',\n  summary: {\n    totalSessions: totalSessions,\n    totalMessages: totalMessages,\n    userMessages: userMessages,\n    assistantMessages: assistantMessages,\n    needHumanSessions: needHumanSessions,\n    aiHandledSessions: Math.max(0, totalSessions - needHumanSessions),\n    handoffRate: rate(needHumanSessions, totalSessions),\n    active24h: active24h,\n    avgMessagesPerSession: totalSessions ? Math.round((totalMessages * 100) / totalSessions) / 100 : 0,\n    latestUpdatedAt: latestUpdatedAt\n  },\n  intentBreakdown: breakdown(intentMap, totalSessions),\n  channelBreakdown: breakdown(channelMap, totalSessions),\n  serviceStateBreakdown: [\n    { name: 'AI自动', count: Math.max(0, totalSessions - needHumanSessions), rate: rate(Math.max(0, totalSessions - needHumanSessions), totalSessions) },\n    { name: '需人工关注', count: needHumanSessions, rate: rate(needHumanSessions, totalSessions) }\n  ],\n  recentSessions: sessions.slice(0, 12),\n  indexCacheKey: msg.indexCacheKey,\n  sessionPrefix: msg.sessionPrefix,\n  notes: ['统计来自规则链缓存，不由前端模拟。', 'assistantMessages 只有扫描到完整会话缓存时才可精确统计；仅索引缓存场景会显示为 0。']\n};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n30_admin_end",
+        "additionalInfo": {
+          "layoutX": 1240,
+          "layoutY": 720
+        },
+        "type": "end",
+        "name": "返回客服管理响应",
+        "debugMode": true,
+        "configuration": {}
+      },
+      {
+        "id": "n35_profile_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 1360
+        },
+        "type": "jsTransform",
+        "name": "准备客户画像保存",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nfunction parsePayload(value) { if (value == null) return {}; if (typeof value === 'object') return value; if (typeof value === 'string') { try { var parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {}; } catch(e) { return {}; } } return {}; }\nmsg = parsePayload(msg);\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nvar profile = (msg.customerProfile && typeof msg.customerProfile === 'object') ? msg.customerProfile : {};\nvar tenantId = clean(msg.tenantId || profile.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || profile.channel || metadata.channel, 'web');\nvar userId = clean(msg.userId || msg.customerId || profile.userId || metadata.userId, 'anonymous');\nvar sessionId = clean(msg.sessionId || msg.conversationId || profile.sessionId || metadata.sessionId, userId);\nvar isolationKey = clean(msg.isolationKey || profile.isolationKey || '', [tenantId, channel, userId, sessionId].map(keyPart).join(':'));\nmsg.operation = 'CUSTOMER_PROFILE_UPSERT';\nmsg.tenantId = tenantId;\nmsg.channel = channel;\nmsg.userId = userId;\nmsg.sessionId = sessionId;\nmsg.isolationKey = isolationKey;\nmsg.contextCacheKey = 'cs:session:' + isolationKey;\nmsg.profileCacheKey = 'cs:customer:' + [tenantId, channel, userId].map(keyPart).join(':');\nmsg.legacyProfileCacheKey = 'cs:profile:' + isolationKey;\nmsg.customerProfile = profile;\nmsg.businessContext = (msg.businessContext && typeof msg.businessContext === 'object') ? msg.businessContext : (profile.businessContext && typeof profile.businessContext === 'object' ? profile.businessContext : {});\nmsg.successCriteria = Array.isArray(msg.successCriteria) ? msg.successCriteria : (Array.isArray(profile.successCriteria) ? profile.successCriteria : []);\nmsg.updatedAt = new Date().toISOString();\nmetadata.csOperation = 'CUSTOMER_PROFILE_UPSERT';\nmetadata.csIsolationKey = isolationKey;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n36_profile_cache_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 1360
+        },
+        "type": "cacheGet",
+        "name": "读取画像会话缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain"
+            },
+            {
+              "key": "${msg.profileCacheKey}",
+              "level": "chain"
+            },
+            {
+              "key": "${msg.legacyProfileCacheKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n37_profile_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 1360
+        },
+        "type": "jsTransform",
+        "name": "合并客户画像与上下文",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nfunction mergeObject(left, right) { var out = {}; left = left && typeof left === 'object' ? left : {}; right = right && typeof right === 'object' ? right : {}; for (var k in left) if (Object.prototype.hasOwnProperty.call(left, k)) out[k] = left[k]; for (var r in right) if (Object.prototype.hasOwnProperty.call(right, r)) out[r] = right[r]; return out; }\nfunction pickLastMessage(chatLog, role) { if (!Array.isArray(chatLog)) return ''; for (var i = chatLog.length - 1; i >= 0; i--) { var item = chatLog[i]; if (!item || typeof item !== 'object') continue; if (!role || item.role === role) return String(item.content || ''); } return ''; }\nvar cached = parseMaybe(msg[msg.contextCacheKey]) || {};\nvar storedProfileRecord = parseMaybe(msg[msg.profileCacheKey]) || parseMaybe(msg[msg.legacyProfileCacheKey]) || {};\nvar storedProfile = storedProfileRecord.customerProfile && typeof storedProfileRecord.customerProfile === 'object' ? storedProfileRecord.customerProfile : storedProfileRecord;\nvar chatLog = Array.isArray(cached.chatLog) ? cached.chatLog : (Array.isArray(cached.recentHistory) ? cached.recentHistory : []);\nvar memory = cached.sessionMemory && typeof cached.sessionMemory === 'object' ? cached.sessionMemory : {};\nvar profile = mergeObject(mergeObject(storedProfile || {}, cached.customerProfile || memory.customerProfile || {}), msg.customerProfile || {});\nprofile.tenantId = msg.tenantId;\nprofile.channel = msg.channel;\nprofile.userId = msg.userId;\nprofile.sessionId = msg.sessionId;\nprofile.isolationKey = msg.isolationKey;\nprofile.businessContext = mergeObject(cached.businessContext || memory.businessContext || {}, msg.businessContext || {});\nprofile.successCriteria = Array.isArray(msg.successCriteria) ? msg.successCriteria : [];\nvar snapshot = mergeObject(cached, {\n  tenantId: msg.tenantId,\n  channel: msg.channel,\n  userId: msg.userId,\n  sessionId: msg.sessionId,\n  isolationKey: msg.isolationKey,\n  customerProfile: profile,\n  businessContext: profile.businessContext,\n  successCriteria: profile.successCriteria,\n  displayName: profile.displayName || profile.name || profile.nickname || cached.displayName || '',\n  lastIntent: cached.lastIntent || cached.intent || memory.lastIntent || '',\n  needHuman: cached.needHuman === true || memory.needHuman === true,\n  updatedAt: msg.updatedAt,\n  chatLog: chatLog,\n  sessionMemory: mergeObject(memory, {\n    tenantId: msg.tenantId,\n    channel: msg.channel,\n    userId: msg.userId,\n    sessionId: msg.sessionId,\n    isolationKey: msg.isolationKey,\n    customerProfile: profile,\n    businessContext: profile.businessContext,\n    successCriteria: profile.successCriteria,\n    updatedAt: msg.updatedAt\n  })\n});\nmsg = {\n  operation: 'CUSTOMER_PROFILE_UPSERT',\n  event: 'CUSTOMER_PROFILE_UPDATED',\n  tenantId: msg.tenantId,\n  channel: msg.channel,\n  userId: msg.userId,\n  sessionId: msg.sessionId,\n  isolationKey: msg.isolationKey,\n  contextCacheKey: msg.contextCacheKey,\n  profileCacheKey: msg.profileCacheKey,\n  customerRecordKey: msg.profileCacheKey,\n  displayName: snapshot.displayName,\n  customerProfile: profile,\n  businessContext: profile.businessContext,\n  successCriteria: profile.successCriteria,\n  lastMessage: pickLastMessage(chatLog, 'user'),\n  lastReply: pickLastMessage(chatLog, 'assistant'),\n  messageCount: chatLog.length,\n  needHuman: snapshot.needHuman,\n  intent: snapshot.lastIntent,\n  updatedAt: msg.updatedAt,\n  source: 'customer-profile-cache',\n  sessionSnapshot: snapshot,\n  sessionSnapshotJson: JSON.stringify(snapshot),\n  profileSnapshotJson: JSON.stringify({ customerId: [msg.tenantId, msg.channel, msg.userId].join(':'), tenantId: msg.tenantId, channel: msg.channel, userId: msg.userId, displayName: snapshot.displayName, customerProfile: profile, businessContext: profile.businessContext, successCriteria: profile.successCriteria, updatedAt: msg.updatedAt })\n};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n38_profile_cache_set",
+        "additionalInfo": {
+          "layoutX": 1000,
+          "layoutY": 1360
+        },
+        "type": "cacheSet",
+        "name": "写入客户画像缓存",
+        "debugMode": true,
+        "configuration": {
+          "items": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain",
+              "ttl": "168h",
+              "value": "${msg.sessionSnapshotJson}"
+            },
+            {
+              "key": "${msg.profileCacheKey}",
+              "level": "chain",
+              "ttl": "168h",
+              "value": "${msg.profileSnapshotJson}"
+            }
+          ]
+        }
+      },
+      {
+        "id": "n40_human_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 1520
+        },
+        "type": "jsTransform",
+        "name": "准备人工辅助处理",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nfunction parsePayload(value) { if (value == null) return {}; if (typeof value === 'object') return value; if (typeof value === 'string') { try { var parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {}; } catch(e) { return {}; } } return {}; }\nmsg = parsePayload(msg);\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nvar profile = (msg.customerProfile && typeof msg.customerProfile === 'object') ? msg.customerProfile : {};\nvar tenantId = clean(msg.tenantId || profile.tenantId || metadata.tenantId, 'default');\nvar channel = clean(msg.channel || profile.channel || metadata.channel, 'web');\nvar userId = clean(msg.userId || msg.customerId || profile.userId || metadata.userId, 'anonymous');\nvar sessionId = clean(msg.sessionId || msg.conversationId || profile.sessionId || metadata.sessionId, userId);\nvar isolationKey = clean(msg.isolationKey || profile.isolationKey || '', [tenantId, channel, userId, sessionId].map(keyPart).join(':'));\nmsg.operation = 'HUMAN_INTERVENTION';\nmsg.tenantId = tenantId;\nmsg.channel = channel;\nmsg.userId = userId;\nmsg.sessionId = sessionId;\nmsg.isolationKey = isolationKey;\nmsg.contextCacheKey = 'cs:session:' + isolationKey;\nmsg.interventionId = clean(msg.interventionId || msg.requestId || '', 'hi_' + Date.now() + '_' + Math.floor(Math.random() * 100000));\nvar assignedAgent = msg.assignedAgent && typeof msg.assignedAgent === 'object' ? msg.assignedAgent : null;\nmsg.agentId = clean(msg.agentId || (assignedAgent && (assignedAgent.id || assignedAgent.agentId)), '');\nmsg.operator = clean(msg.operator || (assignedAgent && (assignedAgent.name || assignedAgent.displayName)) || msg.agentName || msg.staffName, '人工客服');\nmsg.action = clean(msg.action || msg.actionType, 'reply');\nif (['reply','note','resolved','escalate','assign','transfer','takeover','return_ai'].indexOf(msg.action) < 0) msg.action = 'reply';\nmsg.assignedAgent = assignedAgent ? { id: msg.agentId || clean(assignedAgent.id || assignedAgent.agentId, ''), agentId: msg.agentId || clean(assignedAgent.id || assignedAgent.agentId, ''), name: msg.operator, displayName: msg.operator, status: clean(assignedAgent.status, 'online'), specialties: Array.isArray(assignedAgent.specialties) ? assignedAgent.specialties : [], skills: Array.isArray(assignedAgent.skills) ? assignedAgent.skills : [], responsibilities: clean(assignedAgent.responsibilities, ''), persona: clean(assignedAgent.persona, ''), maxConcurrent: Math.max(1, parseInt(assignedAgent.maxConcurrent || '8', 10) || 8) } : null;\nmsg.actionLabel = clean(msg.actionLabel || '', msg.action);\nmsg.priority = clean(msg.priority, 'normal');\nmsg.ticketId = clean(msg.ticketId || msg.ticketNo || '', '');\nmsg.message = String(msg.message || msg.reply || msg.content || '').trim();\nmsg.note = String(msg.note || msg.internalNote || '').trim();\nmsg.customerProfile = profile;\nmsg.businessContext = (msg.businessContext && typeof msg.businessContext === 'object') ? msg.businessContext : {};\nmsg.successCriteria = Array.isArray(msg.successCriteria) ? msg.successCriteria : [];\nmsg.updatedAt = new Date().toISOString();\nmetadata.csOperation = 'HUMAN_INTERVENTION';\nmetadata.csIsolationKey = isolationKey;\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n41_human_cache_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 1520
+        },
+        "type": "cacheGet",
+        "name": "读取人工辅助会话缓存",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n42_human_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 1520
+        },
+        "type": "jsTransform",
+        "name": "合并人工辅助结果",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nfunction mergeObject(left, right) { var out = {}; left = left && typeof left === 'object' ? left : {}; right = right && typeof right === 'object' ? right : {}; for (var k in left) if (Object.prototype.hasOwnProperty.call(left, k)) out[k] = left[k]; for (var r in right) if (Object.prototype.hasOwnProperty.call(right, r)) out[r] = right[r]; return out; }\nfunction pickLastMessage(chatLog, role) { if (!Array.isArray(chatLog)) return ''; for (var i = chatLog.length - 1; i >= 0; i--) { var item = chatLog[i]; if (!item || typeof item !== 'object') continue; if (!role || item.role === role) return String(item.content || ''); } return ''; }\nvar cached = parseMaybe(msg[msg.contextCacheKey]) || {};\nvar chatLog = Array.isArray(cached.chatLog) ? cached.chatLog.slice() : (Array.isArray(cached.recentHistory) ? cached.recentHistory.slice() : []);\nvar memory = cached.sessionMemory && typeof cached.sessionMemory === 'object' ? cached.sessionMemory : {};\nvar action = msg.action || 'reply';\nvar currentAssigned = cached.assignedAgent || memory.assignedAgent || null;\nif (memory.aiAutoContinue === undefined && cached.aiAutoContinue !== undefined) memory.aiAutoContinue = cached.aiAutoContinue;\nvar incomingAssigned = msg.assignedAgent && typeof msg.assignedAgent === 'object' ? msg.assignedAgent : null;\nvar assignedAgent = action === 'return_ai' ? null : (incomingAssigned || currentAssigned);\nvar needHuman = action === 'escalate';\nvar agentStatus = assignedAgent ? 'human_active' : (needHuman ? 'waiting_human' : 'ai_auto');\nvar aiAutoContinue = action === 'takeover' ? false : (action === 'return_ai' ? true : (memory.aiAutoContinue !== false));\nif (action === 'assign' || action === 'transfer') aiAutoContinue = true;\nvar reply = String(msg.message || '').trim();\nvar interventions = Array.isArray(memory.humanInterventions) ? memory.humanInterventions.slice() : [];\nvar existingIntervention = null;\nfor (var existingIndex = 0; existingIndex < interventions.length; existingIndex++) { if (String(interventions[existingIndex].id || '') === String(msg.interventionId || '')) { existingIntervention = interventions[existingIndex]; break; } }\nvar record = {\n  id: msg.interventionId,\n  tenantId: msg.tenantId,\n  channel: msg.channel,\n  userId: msg.userId,\n  sessionId: msg.sessionId,\n  isolationKey: msg.isolationKey,\n  agentId: assignedAgent ? String(assignedAgent.id || assignedAgent.agentId || '') : '',\n  assignedAgent: assignedAgent,\n  operator: msg.operator,\n  action: action,\n  actionLabel: msg.actionLabel,\n  priority: msg.priority,\n  ticketId: msg.ticketId,\n  message: reply,\n  note: msg.note,\n  previousHandoffSummary: msg.handoffSummary || cached.handoffSummary || memory.handoffSummary || '',\n  agentStatus: agentStatus,\n  aiAutoContinue: aiAutoContinue,\n  createdAt: msg.updatedAt,\n  source: 'human-assist'\n};\nif (!existingIntervention && reply && action !== 'note') {\n  chatLog.push({ id:msg.interventionId, role:'assistant', content: reply, tenantId: msg.tenantId, channel: msg.channel, userId: msg.userId, sessionId: msg.sessionId, isolationKey: msg.isolationKey, ts: msg.updatedAt, author: msg.operator, operator: msg.operator, agentId: record.agentId, source:'human_assist', action: action });\n}\nif (!existingIntervention) interventions.push(record);\nelse record = existingIntervention;\ninterventions = interventions.slice(-50);\nvar handoffSummary = msg.note || msg.handoffSummary || (msg.actionLabel + '；坐席：' + msg.operator + (msg.ticketId ? ('；工单：' + msg.ticketId) : ''));\nvar profile = mergeObject(cached.customerProfile || memory.customerProfile || {}, msg.customerProfile || {});\nvar businessContext = mergeObject(cached.businessContext || memory.businessContext || {}, msg.businessContext || {});\nvar lastIntent = action === 'escalate' ? 'human_handoff' : (cached.lastIntent || cached.intent || memory.lastIntent || msg.intent || 'unknown');\nvar snapshot = mergeObject(cached, {\n  tenantId: msg.tenantId,\n  channel: msg.channel,\n  userId: msg.userId,\n  sessionId: msg.sessionId,\n  isolationKey: msg.isolationKey,\n  customerProfile: profile,\n  businessContext: businessContext,\n  successCriteria: Array.isArray(msg.successCriteria) && msg.successCriteria.length ? msg.successCriteria : (cached.successCriteria || memory.successCriteria || []),\n  displayName: profile.displayName || cached.displayName || '',\n  intent: lastIntent,\n  lastIntent: lastIntent,\n  needHuman: needHuman,\n  assignedAgent: assignedAgent,\n  agentStatus: agentStatus,\n  aiAutoContinue: aiAutoContinue,\n  handoffSummary: handoffSummary,\n  updatedAt: msg.updatedAt,\n  chatLog: chatLog,\n  sessionMemory: mergeObject(memory, {\n    tenantId: msg.tenantId,\n    channel: msg.channel,\n    userId: msg.userId,\n    sessionId: msg.sessionId,\n    isolationKey: msg.isolationKey,\n    customerProfile: profile,\n    businessContext: businessContext,\n    successCriteria: Array.isArray(msg.successCriteria) && msg.successCriteria.length ? msg.successCriteria : (memory.successCriteria || []),\n    humanInterventions: interventions,\n    needHuman: needHuman,\n    assignedAgent: assignedAgent,\n    agentStatus: agentStatus,\n    aiAutoContinue: aiAutoContinue,\n    lastIntent: lastIntent,\n    handoffSummary: handoffSummary,\n    updatedAt: msg.updatedAt\n  })\n});\nmsg = {\n  operation: 'HUMAN_INTERVENTION',\n  event: 'HUMAN_INTERVENTION_DONE',\n  tenantId: msg.tenantId,\n  channel: msg.channel,\n  userId: msg.userId,\n  sessionId: msg.sessionId,\n  isolationKey: msg.isolationKey,\n  contextCacheKey: msg.contextCacheKey,\n  interventionId: msg.interventionId,\n  reply: reply,\n  message: reply,\n  operator: msg.operator,\n  agentId: record.agentId,\n  assignedAgent: assignedAgent,\n  action: action,\n  actionLabel: msg.actionLabel,\n  priority: msg.priority,\n  ticketId: msg.ticketId,\n  intent: lastIntent,\n  needHuman: needHuman,\n  agentStatus: agentStatus,\n  aiAutoContinue: aiAutoContinue,\n  handoffSummary: handoffSummary,\n  customerProfile: profile,\n  businessContext: businessContext,\n  successCriteria: snapshot.successCriteria,\n  chatLog: chatLog,\n  lastMessage: pickLastMessage(chatLog, 'user'),\n  lastReply: pickLastMessage(chatLog, 'assistant'),\n  messageCount: chatLog.length,\n  interventionRecord: record,\n  functionCalls: [{ name:'human_assist', skill:'manual_service', status:'success', operator:msg.operator, agentId:record.agentId, action:action, aiAutoContinue:aiAutoContinue }],\n  contextSources: [{ name:'人工服务接口', detail:'HUMAN_INTERVENTION 记录接入、转接、回复和退回 AI 状态' }],\n  updatedAt: msg.updatedAt,\n  source: 'human-assist',\n  sessionSnapshot: snapshot,\n  sessionSnapshotJson: JSON.stringify(snapshot),\n  interventionRecordJson: JSON.stringify(record)\n};\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n43_human_cache_set",
+        "additionalInfo": {
+          "layoutX": 1000,
+          "layoutY": 1520
+        },
+        "type": "cacheSet",
+        "name": "写入人工辅助会话",
+        "debugMode": true,
+        "configuration": {
+          "items": [
+            {
+              "key": "${msg.contextCacheKey}",
+              "level": "chain",
+              "ttl": "168h",
+              "value": "${msg.sessionSnapshotJson}"
+            },
+            {
+              "key": "cs:handoff:${msg.isolationKey}:${msg.interventionId}",
+              "level": "chain",
+              "ttl": "168h",
+              "value": "${msg.interventionRecordJson}"
+            }
+          ]
+        }
+      },
+      {
+        "id": "n50_agent_list_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 1680
+        },
+        "type": "jsTransform",
+        "name": "准备坐席列表查询",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg && typeof msg === 'object' ? msg : {};\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nmsg.operation = 'AGENT_LIST';\nmsg.tenantId = clean(msg.tenantId || metadata.tenantId, 'default');\nmsg.agentCacheKey = 'cs:agents:' + keyPart(msg.tenantId);\nmetadata.csOperation = 'AGENT_LIST';\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n51_agent_list_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 1680
+        },
+        "type": "cacheGet",
+        "name": "读取坐席档案",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.agentCacheKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n52_agent_list_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 1680
+        },
+        "type": "jsTransform",
+        "name": "包装坐席列表",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nvar stored = parseMaybe(msg[msg.agentCacheKey]);\nvar agents = Array.isArray(stored) ? stored : (stored && Array.isArray(stored.agents) ? stored.agents : []);\nagents.sort(function(a, b) { var rank = {online:3,busy:2,offline:1}; return (rank[b.status] || 0) - (rank[a.status] || 0) || String(a.name || '').localeCompare(String(b.name || '')); });\nmsg = { operation:'AGENT_LIST', event:'AGENT_LIST_UPDATED', tenantId:msg.tenantId, agents:agents, total:agents.length, storage:'chain-cache', agentCacheKey:msg.agentCacheKey, updatedAt:stored && stored.updatedAt ? stored.updatedAt : '' };\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n53_agent_upsert_prepare",
+        "additionalInfo": {
+          "layoutX": 300,
+          "layoutY": 1840
+        },
+        "type": "jsTransform",
+        "name": "准备坐席档案保存",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg && typeof msg === 'object' ? msg : {};\nfunction clean(value, fallback) { var text = String(value == null ? '' : value).trim(); return text || fallback; }\nfunction keyPart(value) { var text = String(value == null ? '' : value).trim(); if (typeof encodeURIComponent === 'function') return encodeURIComponent(text); return text.replace(/[^A-Za-z0-9_.@-]/g, '_'); }\nfunction normalizeSkillRefs(value) { var list = Array.isArray(value) ? value : []; var out = []; var seen = {}; for (var i = 0; i < list.length; i++) { var item = list[i]; var id = ''; var scope = 'global'; if (typeof item === 'string') { var text = String(item).trim(); var matched = text.match(/^(global|local):(.+)$/i); id = matched ? String(matched[2]).trim() : text; scope = matched ? String(matched[1]).toLowerCase() : 'global'; } else if (item && typeof item === 'object') { id = String(item.id || item.skillId || item.name || '').trim(); scope = String(item.scope || 'global').toLowerCase() === 'local' ? 'local' : 'global'; } if (!id) continue; var key = scope + ':' + id; if (seen[key]) continue; seen[key] = true; out.push({id:id, scope:scope}); } return out; }\nvar input = msg.agent && typeof msg.agent === 'object' ? msg.agent : msg;\nvar tenantId = clean(msg.tenantId || input.tenantId || metadata.tenantId, 'default');\nvar id = clean(input.id || input.agentId, '');\nvar name = clean(input.name || input.displayName, '');\nif (!id || !name) throw new Error('agent.id and agent.name are required');\nvar status = clean(input.status, 'offline').toLowerCase();\nif (['online','busy','offline'].indexOf(status) < 0) status = 'offline';\nmsg.operation = 'AGENT_UPSERT';\nmsg.tenantId = tenantId;\nmsg.agentCacheKey = 'cs:agents:' + keyPart(tenantId);\nmsg.agent = { id:id, agentId:id, name:name, displayName:name, status:status, specialties:Array.isArray(input.specialties) ? input.specialties : (Array.isArray(input.routingTags) ? input.routingTags : []), skills:normalizeSkillRefs(Array.isArray(input.skills) ? input.skills : (Array.isArray(input.skillIds) ? input.skillIds : [])), responsibilities:clean(input.responsibilities, ''), persona:clean(input.persona, ''), maxConcurrent:Math.max(1, parseInt(input.maxConcurrent || '8', 10) || 8), activeSessions:Math.max(0, parseInt(input.activeSessions || '0', 10) || 0), updatedAt:new Date().toISOString() };\nmetadata.csOperation = 'AGENT_UPSERT';\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n54_agent_upsert_get",
+        "additionalInfo": {
+          "layoutX": 520,
+          "layoutY": 1840
+        },
+        "type": "cacheGet",
+        "name": "读取现有坐席档案",
+        "debugMode": true,
+        "configuration": {
+          "keys": [
+            {
+              "key": "${msg.agentCacheKey}",
+              "level": "chain"
+            }
+          ],
+          "outputMode": 1,
+          "whenKeyNotFound": "success"
+        }
+      },
+      {
+        "id": "n55_agent_upsert_wrap",
+        "additionalInfo": {
+          "layoutX": 760,
+          "layoutY": 1840
+        },
+        "type": "jsTransform",
+        "name": "合并坐席档案",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nfunction parseMaybe(value) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value === 'string') { try { return JSON.parse(value); } catch(e) { return null; } } return null; }\nvar stored = parseMaybe(msg[msg.agentCacheKey]);\nvar agents = Array.isArray(stored) ? stored.slice() : (stored && Array.isArray(stored.agents) ? stored.agents.slice() : []);\nvar next = [];\nvar replaced = false;\nfor (var i = 0; i < agents.length; i++) { if (String(agents[i].id || agents[i].agentId) === msg.agent.id) { next.push(msg.agent); replaced = true; } else next.push(agents[i]); }\nif (!replaced) next.push(msg.agent);\nnext.sort(function(a, b) { var rank = {online:3,busy:2,offline:1}; return (rank[b.status] || 0) - (rank[a.status] || 0) || String(a.name || '').localeCompare(String(b.name || '')); });\nvar updatedAt = new Date().toISOString();\nvar record = { tenantId:msg.tenantId, agents:next, updatedAt:updatedAt, version:1 };\nmsg = { operation:'AGENT_UPSERT', event:'AGENT_UPDATED', tenantId:msg.tenantId, agent:msg.agent, agents:next, total:next.length, storage:'chain-cache', agentCacheKey:msg.agentCacheKey, agentsSnapshotJson:JSON.stringify(record), updatedAt:updatedAt };\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      },
+      {
+        "id": "n56_agent_upsert_set",
+        "additionalInfo": {
+          "layoutX": 1000,
+          "layoutY": 1840
+        },
+        "type": "cacheSet",
+        "name": "写入坐席档案",
+        "debugMode": true,
+        "configuration": {
+          "items": [
+            {
+              "key": "${msg.agentCacheKey}",
+              "level": "chain",
+              "ttl": "8760h",
+              "value": "${msg.agentsSnapshotJson}"
+            }
+          ]
+        }
+      },
+      {
+        "id": "n3a_ai_service_gate",
+        "additionalInfo": {
+          "layoutX": 940,
+          "layoutY": 240
+        },
+        "type": "jsFilter",
+        "name": "是否继续 AI 自动服务",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "return !(msg && msg.sessionMemory && msg.sessionMemory.aiAutoContinue === false);"
+        }
+      },
+      {
+        "id": "n3d_human_wait",
+        "additionalInfo": {
+          "layoutX": 1160,
+          "layoutY": 180
+        },
+        "type": "jsTransform",
+        "name": "等待人工坐席回复",
+        "debugMode": true,
+        "configuration": {
+          "jsScript": "metadata = metadata || {};\nmsg = msg || {};\nvar assigned = msg.sessionMemory && msg.sessionMemory.assignedAgent ? msg.sessionMemory.assignedAgent : null;\nvar agentName = assigned ? String(assigned.name || assigned.displayName || '人工客服') : '人工客服';\nmsg.reply = '已收到你的消息，' + agentName + ' 正在处理当前会话，请稍候。';\nmsg.intent = msg.sessionMemory && msg.sessionMemory.lastIntent ? msg.sessionMemory.lastIntent : 'human_handoff';\nmsg.needHuman = true;\nmsg.assignedAgent = assigned;\nmsg.agentStatus = assigned ? 'human_active' : 'waiting_human';\nmsg.aiAutoContinue = false;\nmsg.source = 'human-wait';\nmsg.handoffSummary = '当前会话由人工坐席接管，AI 自动回复已暂停。';\nmsg.actions = ['wait_human_reply'];\nmsg.functionCalls = [{name:'service_mode_gate',status:'success',mode:'human_takeover'}];\nreturn {'msg':msg,'metadata':metadata,'msgType':msgType,'dataType':'JSON'};"
+        }
+      }
+    ],
+    "connections": [
+      {
+        "fromId": "n2_cache_get",
+        "toId": "n3_merge_context",
+        "type": "Success"
+      },
+      {
+        "fromId": "n2_cache_get",
+        "toId": "n3_merge_context",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n5_order",
+        "type": "order_query"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n6_after",
+        "type": "refund_after_sales"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n7_tech",
+        "type": "technical_support"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n8_faq",
+        "type": "faq"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n9_handoff",
+        "type": "human_handoff"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n10_other",
+        "type": "other"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n10_other",
+        "type": "Default"
+      },
+      {
+        "fromId": "n4_intent",
+        "toId": "n10_other",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n5_order",
+        "toId": "n5_order_has_api",
+        "type": "Success"
+      },
+      {
+        "fromId": "n5_order_has_api",
+        "toId": "n5_order_api",
+        "type": "True"
+      },
+      {
+        "fromId": "n5_order_api",
+        "toId": "n5_order_api_merge",
+        "type": "Success"
+      },
+      {
+        "fromId": "n5_order_api",
+        "toId": "n5_order_api_error",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n12_fallback",
+        "toId": "n13_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n13_wrap",
+        "toId": "n14_cache_set",
+        "type": "Success"
+      },
+      {
+        "fromId": "n14_cache_set",
+        "toId": "n15_need_handoff",
+        "type": "Success"
+      },
+      {
+        "fromId": "n14_cache_set",
+        "toId": "n15_need_handoff",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n15_need_handoff",
+        "toId": "n16_handoff_cache",
+        "type": "True"
+      },
+      {
+        "fromId": "n15_need_handoff",
+        "toId": "n17_end",
+        "type": "False"
+      },
+      {
+        "fromId": "n15_need_handoff",
+        "toId": "n17_end",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n16_handoff_cache",
+        "toId": "n17_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n16_handoff_cache",
+        "toId": "n17_end",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n3b_local_intent",
+        "toId": "n3c_intent_route",
+        "type": "Success"
+      },
+      {
+        "fromId": "n3b_local_intent",
+        "toId": "n4_intent",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n5_order",
+        "type": "order_query"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n6_after",
+        "type": "refund_after_sales"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n7_tech",
+        "type": "technical_support"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n8_faq",
+        "type": "faq"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n9_handoff",
+        "type": "human_handoff"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n10_other",
+        "type": "other"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n4_intent",
+        "type": "ai_intent"
+      },
+      {
+        "fromId": "n3c_intent_route",
+        "toId": "n4_intent",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n11_build_ai_request",
+        "toId": "n11_call_ai",
+        "type": "Success"
+      },
+      {
+        "fromId": "n11_build_ai_request",
+        "toId": "n12_fallback",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n11_call_ai",
+        "toId": "n11_extract_ai_reply",
+        "type": "Success"
+      },
+      {
+        "fromId": "n11_call_ai",
+        "toId": "n12_fallback",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n11_extract_ai_reply",
+        "toId": "n13_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n11_extract_ai_reply",
+        "toId": "n12_fallback",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n5_order_has_api",
+        "toId": "n11_build_ai_request",
+        "type": "False"
+      },
+      {
+        "fromId": "n5_order_has_api",
+        "toId": "n11_build_ai_request",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n5_order_api_merge",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n5_order_api_error",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n6_after",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n7_tech",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n8_faq",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n9_handoff",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n10_other",
+        "toId": "n11_build_ai_request",
+        "type": "Success"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n1_normalize",
+        "type": "CUSTOMER_MESSAGE"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n1_normalize",
+        "type": "Default"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n1_normalize",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n1_normalize",
+        "toId": "n2_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n20_list_prepare",
+        "type": "CUSTOMER_LIST"
+      },
+      {
+        "fromId": "n20_list_prepare",
+        "toId": "n21_list_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n21_list_cache_get",
+        "toId": "n22_list_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n21_list_cache_get",
+        "toId": "n22_list_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n22_list_wrap",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n23_history_prepare",
+        "type": "CONVERSATION_HISTORY"
+      },
+      {
+        "fromId": "n23_history_prepare",
+        "toId": "n24_history_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n24_history_cache_get",
+        "toId": "n25_history_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n24_history_cache_get",
+        "toId": "n25_history_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n25_history_wrap",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n26_schedule_prepare",
+        "type": "SCHEDULE_MAINTAIN"
+      },
+      {
+        "fromId": "n26_schedule_prepare",
+        "toId": "n27_schedule_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n27_schedule_cache_get",
+        "toId": "n28_schedule_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n27_schedule_cache_get",
+        "toId": "n28_schedule_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n28_schedule_wrap",
+        "toId": "n29_schedule_cache_set",
+        "type": "Success"
+      },
+      {
+        "fromId": "n29_schedule_cache_set",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n29_schedule_cache_set",
+        "toId": "n30_admin_end",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n32_report_prepare",
+        "type": "RESPONSE_REPORT"
+      },
+      {
+        "fromId": "n32_report_prepare",
+        "toId": "n33_report_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n33_report_cache_get",
+        "toId": "n34_report_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n33_report_cache_get",
+        "toId": "n34_report_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n34_report_wrap",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n31_quick_inputs",
+        "type": "QUICK_INPUTS"
+      },
+      {
+        "fromId": "n31_quick_inputs",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n35_profile_prepare",
+        "type": "CUSTOMER_PROFILE_UPSERT"
+      },
+      {
+        "fromId": "n35_profile_prepare",
+        "toId": "n36_profile_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n36_profile_cache_get",
+        "toId": "n37_profile_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n36_profile_cache_get",
+        "toId": "n37_profile_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n37_profile_wrap",
+        "toId": "n38_profile_cache_set",
+        "type": "Success"
+      },
+      {
+        "fromId": "n38_profile_cache_set",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n38_profile_cache_set",
+        "toId": "n30_admin_end",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n40_human_prepare",
+        "type": "HUMAN_INTERVENTION"
+      },
+      {
+        "fromId": "n40_human_prepare",
+        "toId": "n41_human_cache_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n41_human_cache_get",
+        "toId": "n42_human_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n41_human_cache_get",
+        "toId": "n42_human_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n42_human_wrap",
+        "toId": "n43_human_cache_set",
+        "type": "Success"
+      },
+      {
+        "fromId": "n43_human_cache_set",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n43_human_cache_set",
+        "toId": "n30_admin_end",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n50_agent_list_prepare",
+        "type": "AGENT_LIST"
+      },
+      {
+        "fromId": "n0_operation_route",
+        "toId": "n53_agent_upsert_prepare",
+        "type": "AGENT_UPSERT"
+      },
+      {
+        "fromId": "n50_agent_list_prepare",
+        "toId": "n51_agent_list_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n51_agent_list_get",
+        "toId": "n52_agent_list_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n51_agent_list_get",
+        "toId": "n52_agent_list_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n52_agent_list_wrap",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n53_agent_upsert_prepare",
+        "toId": "n54_agent_upsert_get",
+        "type": "Success"
+      },
+      {
+        "fromId": "n54_agent_upsert_get",
+        "toId": "n55_agent_upsert_wrap",
+        "type": "Success"
+      },
+      {
+        "fromId": "n54_agent_upsert_get",
+        "toId": "n55_agent_upsert_wrap",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n55_agent_upsert_wrap",
+        "toId": "n56_agent_upsert_set",
+        "type": "Success"
+      },
+      {
+        "fromId": "n56_agent_upsert_set",
+        "toId": "n30_admin_end",
+        "type": "Success"
+      },
+      {
+        "fromId": "n56_agent_upsert_set",
+        "toId": "n30_admin_end",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n3_merge_context",
+        "toId": "n3a_ai_service_gate",
+        "type": "Success"
+      },
+      {
+        "fromId": "n3a_ai_service_gate",
+        "toId": "n3b_local_intent",
+        "type": "True"
+      },
+      {
+        "fromId": "n3a_ai_service_gate",
+        "toId": "n3d_human_wait",
+        "type": "False"
+      },
+      {
+        "fromId": "n3a_ai_service_gate",
+        "toId": "n3b_local_intent",
+        "type": "Failure"
+      },
+      {
+        "fromId": "n3d_human_wait",
+        "toId": "n13_wrap",
+        "type": "Success"
+      }
+    ],
+    "endpoints": [
+      {
+        "id": "cs_business_ws_ep",
+        "type": "endpoint/ws",
+        "name": "客服业务实时 WebSocket",
+        "configuration": {
+          "server": ":6334",
+          "allowCors": true
+        },
+        "routers": [
+          {
+            "id": "cs_business_ws_route",
+            "from": {
+              "path": "/api/v1/customer-service/ws",
+              "processors": [
+                "setJsonDataType"
+              ]
+            },
+            "to": {
+              "path": "chain:ai_customer_service_backend_v1:n0_operation_route",
+              "wait": true,
+              "processors": [
+                "responseToBody"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "cs_schedule_ep",
+        "type": "endpoint/schedule",
+        "name": "客服会话维护排程",
+        "routers": [
+          {
+            "from": {
+              "path": "0 */5 * * * *"
+            },
+            "to": {
+              "path": "chain:ai_customer_service_backend_v1:n0_operation_route"
+            },
+            "params": [
+              "{\"operation\":\"SCHEDULE_MAINTAIN\",\"tenantId\":\"default\",\"channel\":\"web\",\"userId\":\"scheduler\",\"sessionId\":\"maintenance\",\"text\":\"维护客服会话索引\"}",
+              "JSON"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
