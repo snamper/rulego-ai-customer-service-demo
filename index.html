@@ -102,39 +102,21 @@
 
     .hero {
       position: relative;
-      height: min(720px, 78svh);
-      min-height: 560px;
-      display: grid;
-      align-items: end;
+      padding-top: 66px;
       overflow: hidden;
-      color: #fff;
       background: #edf3f8;
-    }
-
-    .hero::before {
-      content: "";
-      position: absolute;
-      z-index: 1;
-      inset: auto 0 0;
-      height: 52%;
-      border-top: 1px solid rgba(255,255,255,.24);
-      background: rgba(8,20,31,.88);
-      backdrop-filter: blur(8px);
-    }
-
-    .hero-media,
-    .hero-slide {
-      position: absolute;
-      inset: 0;
     }
 
     .hero-media {
-      inset: 66px 0 0;
+      position: relative;
+      height: clamp(360px, 56svh, 560px);
       overflow: hidden;
       background: #edf3f8;
     }
 
     .hero-slide {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
       display: block;
@@ -153,15 +135,21 @@
     .hero-content {
       position: relative;
       z-index: 2;
-      padding: 104px 0 42px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 18px 36px;
+      padding: 22px 0 28px;
+      color: var(--ink);
     }
 
     .hero-switcher {
+      grid-column: 1 / -1;
       display: flex;
       align-items: center;
       gap: 20px;
-      margin-bottom: 15px;
-      border-bottom: 1px solid rgba(255,255,255,.24);
+      margin-bottom: 0;
+      border-bottom: 1px solid var(--line);
     }
 
     .hero-switch {
@@ -169,15 +157,15 @@
       padding: 0 0 8px;
       border: 0;
       border-bottom: 3px solid transparent;
-      color: rgba(255,255,255,.7);
+      color: var(--muted);
       background: transparent;
       cursor: pointer;
       font: 700 13px/1.4 "PingFang SC", "Microsoft YaHei", sans-serif;
     }
 
     .hero-switch[aria-pressed="true"] {
-      color: #fff;
-      border-bottom-color: #3bc6a5;
+      color: var(--ink);
+      border-bottom-color: var(--green);
     }
 
     .eyebrow,
@@ -193,7 +181,7 @@
       display: flex;
       align-items: center;
       gap: 9px;
-      color: #bdeee2;
+      color: var(--green);
       font-size: 13px;
     }
 
@@ -214,22 +202,24 @@
     h1 {
       max-width: 760px;
       margin-bottom: 10px;
-      font-size: 48px;
+      font-size: 38px;
       line-height: 1.14;
     }
 
     .hero-copy {
       max-width: 720px;
-      margin-bottom: 22px;
-      color: rgba(255,255,255,.86);
-      font-size: 16px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 15px;
     }
 
     .hero-actions {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 12px;
       flex-wrap: wrap;
+      padding-bottom: 2px;
     }
 
     .action-link {
@@ -238,18 +228,18 @@
       align-items: center;
       justify-content: center;
       padding: 9px 17px;
-      border: 1px solid rgba(255,255,255,.72);
+      border: 1px solid #8e9aa1;
       border-radius: 6px;
-      color: #fff;
-      background: rgba(16,24,32,.24);
+      color: var(--ink);
+      background: #fff;
       text-decoration: none;
       font-weight: 700;
       transition: transform .18s ease, background .18s ease;
     }
 
-    .action-link.primary { border-color: #fff; color: var(--ink); background: #fff; }
-    .action-link:hover { transform: translateY(-1px); background: rgba(23,105,170,.9); }
-    .action-link.primary:hover { background: #edf7f4; }
+    .action-link.primary { border-color: var(--ink); color: #fff; background: var(--ink); }
+    .action-link:hover { transform: translateY(-1px); border-color: var(--blue); color: var(--blue); background: #fff; }
+    .action-link.primary:hover { border-color: var(--green); color: #fff; background: var(--green); }
 
     .section { padding: 72px 0; }
     .section.soft { background: var(--soft); }
@@ -433,7 +423,10 @@
 
     @media (max-width: 960px) {
       .nav-links a:not(.nav-primary) { display: none; }
-      h1 { font-size: 40px; }
+      .hero-content { grid-template-columns: 1fr; align-items: start; }
+      .hero-switcher { grid-column: auto; }
+      .hero-actions { justify-content: flex-start; }
+      h1 { font-size: 36px; }
       .section-heading { grid-template-columns: 1fr; gap: 12px; }
       .module-grid { grid-template-columns: 1fr; }
       .module { min-height: 0; }
@@ -447,20 +440,19 @@
       .site-header { height: 58px; }
       .header-inner, .hero-content, .section-inner, .contact-inner { width: min(100% - 28px, var(--max)); }
       .brand-mark { width: 28px; height: 28px; }
-      .hero { height: min(740px, 86svh); min-height: 600px; }
-      .hero::before { height: 62%; }
-      .hero-media { inset: 58px 0 0; }
+      .hero { padding-top: 58px; }
+      .hero-media { height: auto; aspect-ratio: 1672 / 941; }
       .hero-slide {
-        height: 46%;
+        height: 100%;
         object-fit: contain;
         object-position: center top;
       }
-      .hero-content { padding: 300px 0 28px; }
+      .hero-content { padding: 18px 0 24px; }
       .hero-switcher { gap: 16px; margin-bottom: 12px; }
       .hero-switch { font-size: 12px; }
       h1 { font-size: 32px; }
       .hero-copy { margin-bottom: 16px; font-size: 14px; }
-      .hero-actions { gap: 8px; }
+      .hero-actions { gap: 8px; padding-bottom: 0; }
       .action-link { width: 100%; }
       .section { padding: 52px 0; }
       h2 { font-size: 28px; }
@@ -508,9 +500,11 @@
           <button class="hero-switch" type="button" data-hero-index="0" aria-pressed="true">客户聊天端</button>
           <button class="hero-switch" type="button" data-hero-index="1" aria-pressed="false">客服工作台</button>
         </div>
-        <p class="eyebrow">客户入口、客服工作台与真实规则链</p>
-        <h1 id="hero-title">RuleGo AI 智能客服</h1>
-        <p class="hero-copy">一套可直接接入真实 RuleGo Server 的完整客服场景，覆盖客户身份、会话上下文、意图与 Skill、AI 自动回复、人工协作、坐席管理和实时审查。</p>
+        <div class="hero-message">
+          <p class="eyebrow">客户入口、客服工作台与真实规则链</p>
+          <h1 id="hero-title">RuleGo AI 智能客服</h1>
+          <p class="hero-copy">一套可直接接入真实 RuleGo Server 的完整客服场景，覆盖客户身份、会话上下文、意图与 Skill、AI 自动回复、人工协作、坐席管理和实时审查。</p>
+        </div>
         <div class="hero-actions">
           <a class="action-link primary" href="customer-client.html">进入客户聊天端</a>
           <a class="action-link" href="customer-service.html">进入客服工作台</a>
@@ -654,8 +648,6 @@ ${global.llm_model}</code></pre>
         startHeroRotation()
       })
     })
-    hero.addEventListener('pointerenter', stopHeroRotation)
-    hero.addEventListener('pointerleave', startHeroRotation)
     hero.addEventListener('focusin', stopHeroRotation)
     hero.addEventListener('focusout', startHeroRotation)
     document.addEventListener('visibilitychange', startHeroRotation)
