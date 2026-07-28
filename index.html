@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="referrer" content="no-referrer" />
   <meta name="description" content="RuleGo AI 智能客服完整演示：客户聊天端、客服工作台与真实规则链。" />
+  <link rel="preload" as="image" href="assets/architecture/ai-customer-client-functional-architecture.png" />
   <link rel="icon" href="data:," />
   <title>RuleGo AI 智能客服</title>
   <style>
@@ -43,6 +44,8 @@
       height: 66px;
       color: #fff;
       border-bottom: 1px solid rgba(255,255,255,.28);
+      background: rgba(8,20,31,.86);
+      backdrop-filter: blur(10px);
     }
 
     .header-inner,
@@ -100,25 +103,81 @@
     .hero {
       position: relative;
       height: min(720px, 78svh);
-      min-height: 520px;
+      min-height: 560px;
       display: grid;
       align-items: end;
       overflow: hidden;
       color: #fff;
-      background: url("assets/screenshots/customer-service-workbench.png") center top / cover no-repeat;
+      background: #edf3f8;
     }
 
     .hero::before {
       content: "";
       position: absolute;
+      z-index: 1;
+      inset: auto 0 0;
+      height: 52%;
+      border-top: 1px solid rgba(255,255,255,.24);
+      background: rgba(8,20,31,.88);
+      backdrop-filter: blur(8px);
+    }
+
+    .hero-media,
+    .hero-slide {
+      position: absolute;
       inset: 0;
-      background: rgba(10,21,28,.66);
+    }
+
+    .hero-media {
+      inset: 66px 0 0;
+      overflow: hidden;
+      background: #edf3f8;
+    }
+
+    .hero-slide {
+      width: 100%;
+      height: 100%;
+      display: block;
+      opacity: 0;
+      object-fit: contain;
+      object-position: center top;
+      transform: scale(1.012);
+      transition: opacity .55s ease, transform 6.4s linear;
+    }
+
+    .hero-slide.is-active {
+      opacity: 1;
+      transform: scale(1);
     }
 
     .hero-content {
       position: relative;
-      z-index: 1;
-      padding: 120px 0 74px;
+      z-index: 2;
+      padding: 104px 0 42px;
+    }
+
+    .hero-switcher {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 15px;
+      border-bottom: 1px solid rgba(255,255,255,.24);
+    }
+
+    .hero-switch {
+      min-height: 34px;
+      padding: 0 0 8px;
+      border: 0;
+      border-bottom: 3px solid transparent;
+      color: rgba(255,255,255,.7);
+      background: transparent;
+      cursor: pointer;
+      font: 700 13px/1.4 "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .hero-switch[aria-pressed="true"] {
+      color: #fff;
+      border-bottom-color: #3bc6a5;
     }
 
     .eyebrow,
@@ -154,16 +213,16 @@
 
     h1 {
       max-width: 760px;
-      margin-bottom: 16px;
-      font-size: 52px;
+      margin-bottom: 10px;
+      font-size: 48px;
       line-height: 1.14;
     }
 
     .hero-copy {
       max-width: 720px;
-      margin-bottom: 30px;
+      margin-bottom: 22px;
       color: rgba(255,255,255,.86);
-      font-size: 17px;
+      font-size: 16px;
     }
 
     .hero-actions {
@@ -374,7 +433,7 @@
 
     @media (max-width: 960px) {
       .nav-links a:not(.nav-primary) { display: none; }
-      h1 { font-size: 43px; }
+      h1 { font-size: 40px; }
       .section-heading { grid-template-columns: 1fr; gap: 12px; }
       .module-grid { grid-template-columns: 1fr; }
       .module { min-height: 0; }
@@ -388,10 +447,20 @@
       .site-header { height: 58px; }
       .header-inner, .hero-content, .section-inner, .contact-inner { width: min(100% - 28px, var(--max)); }
       .brand-mark { width: 28px; height: 28px; }
-      .hero { min-height: 510px; background-position: 36% top; }
-      .hero-content { padding: 94px 0 48px; }
-      h1 { font-size: 34px; }
-      .hero-copy { font-size: 15px; }
+      .hero { height: min(740px, 86svh); min-height: 600px; }
+      .hero::before { height: 62%; }
+      .hero-media { inset: 58px 0 0; }
+      .hero-slide {
+        height: 46%;
+        object-fit: contain;
+        object-position: center top;
+      }
+      .hero-content { padding: 300px 0 28px; }
+      .hero-switcher { gap: 16px; margin-bottom: 12px; }
+      .hero-switch { font-size: 12px; }
+      h1 { font-size: 32px; }
+      .hero-copy { margin-bottom: 16px; font-size: 14px; }
+      .hero-actions { gap: 8px; }
       .action-link { width: 100%; }
       .section { padding: 52px 0; }
       h2 { font-size: 28px; }
@@ -407,6 +476,7 @@
       html { scroll-behavior: auto; }
       *, *::before, *::after { transition: none !important; }
       [data-reveal] { opacity: 1; transform: none; }
+      .hero-slide { transform: none; }
     }
   </style>
 </head>
@@ -429,7 +499,15 @@
 
   <main id="top">
     <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-media" aria-hidden="true">
+        <img class="hero-slide is-active" src="assets/architecture/ai-customer-client-functional-architecture.png" alt="" fetchpriority="high" decoding="async" />
+        <img class="hero-slide" src="assets/architecture/ai-customer-workbench-functional-architecture.png" alt="" decoding="async" />
+      </div>
       <div class="hero-content">
+        <div class="hero-switcher" aria-label="切换首页展示图">
+          <button class="hero-switch" type="button" data-hero-index="0" aria-pressed="true">客户聊天端</button>
+          <button class="hero-switch" type="button" data-hero-index="1" aria-pressed="false">客服工作台</button>
+        </div>
         <p class="eyebrow">客户入口、客服工作台与真实规则链</p>
         <h1 id="hero-title">RuleGo AI 智能客服</h1>
         <p class="hero-copy">一套可直接接入真实 RuleGo Server 的完整客服场景，覆盖客户身份、会话上下文、意图与 Skill、AI 自动回复、人工协作、坐席管理和实时审查。</p>
@@ -544,6 +622,46 @@ ${global.llm_model}</code></pre>
   <footer>RuleGo AI Customer Service Demo · Apache-2.0</footer>
 
   <script>
+    const hero = document.querySelector('.hero')
+    const heroSlides = Array.from(document.querySelectorAll('.hero-slide'))
+    const heroSwitches = Array.from(document.querySelectorAll('.hero-switch'))
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let activeHeroIndex = 0
+    let heroRotationTimer = null
+
+    const showHeroSlide = (nextIndex) => {
+      activeHeroIndex = nextIndex
+      heroSlides.forEach((slide, index) => slide.classList.toggle('is-active', index === activeHeroIndex))
+      heroSwitches.forEach((button, index) => button.setAttribute('aria-pressed', String(index === activeHeroIndex)))
+    }
+
+    const stopHeroRotation = () => {
+      if (heroRotationTimer !== null) window.clearInterval(heroRotationTimer)
+      heroRotationTimer = null
+    }
+
+    const startHeroRotation = () => {
+      stopHeroRotation()
+      if (reduceMotion.matches || heroSlides.length < 2 || document.hidden) return
+      heroRotationTimer = window.setInterval(() => {
+        showHeroSlide((activeHeroIndex + 1) % heroSlides.length)
+      }, 6400)
+    }
+
+    heroSwitches.forEach((button, index) => {
+      button.addEventListener('click', () => {
+        showHeroSlide(index)
+        startHeroRotation()
+      })
+    })
+    hero.addEventListener('pointerenter', stopHeroRotation)
+    hero.addEventListener('pointerleave', startHeroRotation)
+    hero.addEventListener('focusin', stopHeroRotation)
+    hero.addEventListener('focusout', startHeroRotation)
+    document.addEventListener('visibilitychange', startHeroRotation)
+    reduceMotion.addEventListener('change', startHeroRotation)
+    startHeroRotation()
+
     const revealItems = document.querySelectorAll('[data-reveal]')
     if ('IntersectionObserver' in window) {
       const observer = new IntersectionObserver((entries) => {
